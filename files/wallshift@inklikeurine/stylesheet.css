@@ -1,0 +1,109 @@
+/* Wallshift applet stylesheet */
+
+/* ── Carousel container (thumbnail strip only) ────────────────────────────── */
+
+.wallshift-carousel {
+    background-color: rgba(18, 18, 18, 0.92);
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ── Scroll view ──────────────────────────────────────────────────────────── */
+
+.wallshift-carousel-scroll {
+ /* background-color: transparent; */
+}
+
+/* ── Thumbnail strip ──────────────────────────────────────────────────────── */
+
+.wallshift-carousel-strip {
+    spacing: 5px;
+    padding: 5;
+}
+
+/* ── Individual thumbnail button ──────────────────────────────────────────── */
+
+.wallshift-carousel-thumb {
+    border-radius: 3px;
+    border: 2px solid transparent;
+    padding: 0;
+    background-color: transparent;
+}
+
+.wallshift-carousel-thumb:hover {
+    border-color: rgba(255, 255, 255, 0.45);
+}
+
+/* Highlight on the currently displayed wallpaper */
+.wallshift-carousel-current {
+    border-color: #4a90d9;
+    border-width: 2px;
+}
+
+/* ── Placeholder (shown before thumbnail generates) ─────────────────────── */
+
+.wallshift-carousel-placeholder {
+    background-color: rgb(55, 55, 55);
+    border-radius: 2px;
+}
+
+/* ── Floating controls bar (separate actor above the thumbnail strip) ──────── */
+/* No background or border — the bar is an invisible grouping container.       */
+/* Each button carries its own themed surface via the system 'button' class.   */
+
+.wallshift-carousel-controls {
+    padding: 3px 6px;
+    spacing: 6px;
+    background-color: transparent;
+    border: none;
+}
+
+/* ── Circular icon buttons (used in controls bar) ────────────────────────── */
+/* Shape is shared; color comes from one of the two theme-variant classes      */
+/* (..-dark / ..-light) applied at runtime based on the panel luminance.       */
+/* The 'button' St class only works inside popup/dialog parents, not chrome.   */
+
+.wallshift-carousel-btn {
+    border-radius: 70px;
+    padding: 7px;
+}
+
+/* Dark-theme variant — solid dark gray surface */
+.wallshift-carousel-btn-dark {
+    background-color: rgba(34, 34, 34, 0.92);
+    color: rgba(255, 255, 255, 0.90);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.wallshift-carousel-btn-dark:hover {
+    background-color: rgba(92, 92, 92, 0.96);
+    color: white;
+    border-color: rgba(255, 255, 255, 0.22);
+}
+.wallshift-carousel-btn-dark:active {
+    background-color: rgba(116, 116, 116, 0.98);
+}
+
+/* Light-theme variant — dark translucent surface on light backgrounds */
+.wallshift-carousel-btn-light {
+    background-color: rgba(0, 0, 0, 0.08);
+    color: rgba(0, 0, 0, 0.75);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.wallshift-carousel-btn-light:hover {
+    background-color: rgba(0, 0, 0, 0.15);
+    color: rgba(0, 0, 0, 0.95);
+    border-color: rgba(0, 0, 0, 0.12);
+}
+.wallshift-carousel-btn-light:active {
+    background-color: rgba(0, 0, 0, 0.24);
+}
+
+/* ── Collapsed container state ────────────────────────────────────────────── */
+/* Applied to _container when the strip is collapsed so the full-width         */
+/* background disappears and only the small expand button is visible.          */
+
+.wallshift-carousel-collapsed {
+    background-color: transparent;
+    border: none;
+}
+

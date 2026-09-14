@@ -1,0 +1,91 @@
+{
+  "layout": {
+    "type": "layout",
+    "pages": ["page-general"],
+    "page-general": {
+      "type": "page",
+      "title": "General",
+      "sections": ["section-timing", "section-display", "section-sync", "section-detection"]
+    },
+    "section-timing": {
+      "type": "section",
+      "title": "Change Interval",
+      "keys": ["interval-minutes", "interval-seconds"]
+    },
+    "section-detection": {
+      "type": "section",
+      "title": "Monitor Detection",
+      "keys": ["detection-interval-minutes"]
+    },
+    "section-display": {
+      "type": "section",
+      "title": "Display",
+      "keys": ["image-order", "show-notifications", "global-folder", "favorites-folder"]
+    },
+    "section-sync": {
+      "type": "section",
+      "title": "Sync Mode",
+      "keys": ["sync-mode"]
+    }
+  },
+
+  "interval-minutes": {
+    "type": "spinbutton",
+    "default": 5,
+    "min": 0,
+    "max": 1440,
+    "step": 1,
+    "units": "minutes",
+    "description": "Change wallpaper every (minutes; 0 = use seconds only)"
+  },
+  "interval-seconds": {
+    "type": "spinbutton",
+    "default": 0,
+    "min": 0,
+    "max": 59,
+    "step": 1,
+    "units": "seconds",
+    "description": "Additional seconds"
+  },
+  "detection-interval-minutes": {
+    "type": "spinbutton",
+    "default": 30,
+    "min": 1,
+    "max": 1440,
+    "step": 1,
+    "units": "minutes",
+    "description": "Re-check for monitor / port changes every (minutes)"
+  },
+  "image-order": {
+    "type": "combobox",
+    "default": "no-repeat",
+    "options": {
+      "Random (no repeats)": "no-repeat",
+      "Random (may repeat)": "random",
+      "Sequential (A\u2013Z)": "sequential"
+    },
+    "description": "Image rotation order"
+  },
+  "show-notifications": {
+    "type": "switch",
+    "default": false,
+    "description": "Show notification when wallpaper changes"
+  },
+  "global-folder": {
+    "type": "filechooser",
+    "default": "",
+    "select-dir": true,
+    "description": "Default wallpaper folder \u2014 fallback for any monitor without its own folder, and the shared pool in Sync Mode"
+  },
+  "favorites-folder": {
+    "type": "filechooser",
+    "default": "",
+    "select-dir": true,
+    "description": "Folder to save favorited wallpapers (default: ~/Pictures/Wallpaper Favorites)"
+  },
+  "sync-mode": {
+    "type": "switch",
+    "default": false,
+    "description": "Same image on all monitors (uses the default wallpaper folder above)"
+  }
+}
