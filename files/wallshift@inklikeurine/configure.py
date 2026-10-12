@@ -3,7 +3,7 @@
 Wallshift configure.py — Settings dialog for the Wallshift Cinnamon applet.
 Opened by applet.js configureApplet(); this is the ONE settings window.
 
-Usage: /usr/bin/python3 configure.py <uuid> <instance_id>
+Usage: /usr/bin/python3 configure.py [<uuid> <instance_id>]
 """
 
 import sys
@@ -579,12 +579,27 @@ class _ConfigureWindow:
 # Entry point
 # ──────────────────────────────────────────────────────────────────────────────
 
-def main():
-    if len(sys.argv) < 3:
-        print("Usage: configure.py <uuid> <instance_id>", file=sys.stderr)
-        sys.exit(1)
+def _metadata_uuid():
+    try:
+        with open(os.path.join(_APPLET_DIR, "metadata.json")) as f:
+            return json.load(f).get("uuid") or os.path.basename(_APPLET_DIR)
+    except Exception:
+        return os.path.basename(_APPLET_DIR)
 
-    _ConfigureWindow(sys.argv[1], sys.argv[2])
+
+def _parse_args(argv):
+    """(uuid, instance_id). The applet's Configure item passes both; System Settings
+    -> Applets runs this file with no arguments (metadata.json
+    "external-configuration-app"). Wallshift is single-instance, so the settings
+    key is the uuid and the instance id is not needed then."""
+    if len(argv) >= 3:
+        return argv[1], argv[2]
+    return _metadata_uuid(), None
+
+
+def main():
+    uuid, instance_id = _parse_args(sys.argv)
+    _ConfigureWindow(uuid, instance_id)
     Gtk.main()
 
 

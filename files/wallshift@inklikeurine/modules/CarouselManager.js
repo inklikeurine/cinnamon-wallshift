@@ -38,6 +38,7 @@ const Clutter = imports.gi.Clutter;
 const Tweener = imports.ui.tweener;
 const Main    = imports.ui.main;
 const GLib    = imports.gi.GLib;
+const Gio     = imports.gi.Gio;
 
 const Utils = require('./modules/Utils');   // relative to the applet dir, as in applet.js
 

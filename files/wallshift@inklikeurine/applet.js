@@ -28,6 +28,9 @@ const ThumbnailCache  = require('./modules/ThumbnailCache').ThumbnailCache;
 const normalizePath = Utils.normalizePath;
 const absoluteDirOr = Utils.absoluteDirOr;
 
+const ICON_NORMAL = 'preferences-desktop-wallpaper-symbolic';
+const ICON_PAUSED = 'media-playback-pause-symbolic';
+
 class WallshiftApplet extends Applet.IconApplet {
 
     constructor(metadata, orientation, panelHeight, instanceId) {
@@ -36,8 +39,8 @@ class WallshiftApplet extends Applet.IconApplet {
         this._metadata    = metadata;
         this._instanceId  = instanceId;
 
-        // ── Panel appearance ───────────────────────────────────────────────────
-        this.set_applet_icon_symbolic_name('preferences-desktop-wallpaper-symbolic');
+        // ── Panel appearance (icon follows the pause state once state is loaded) ─
+        this.set_applet_icon_symbolic_name(ICON_NORMAL);
         this.set_applet_tooltip(_('Wallshift'));
 
         // ── Runtime state ──────────────────────────────────────────────────────
@@ -74,6 +77,7 @@ class WallshiftApplet extends Applet.IconApplet {
         // ── Modules ────────────────────────────────────────────────────────────
         this._stateManager = new StateManager(this._stateDir);
         this._stateManager.load();
+        this._updatePanelIcon();   // rotation may have been paused before a reload
 
         this._compositor = new Compositor(this._cacheDir);
 
@@ -214,8 +218,7 @@ class WallshiftApplet extends Applet.IconApplet {
     }
 
     _getIntervalSeconds() {
-        let total = (this._intervalMinutes || 5) * 60 + (this._intervalSeconds || 0);
-        return total < 10 ? 10 : total;
+        return Utils.intervalSeconds(this._intervalMinutes, this._intervalSeconds);
     }
 
     // ── Monitor ready ──────────────────────────────────────────────────────────
@@ -280,8 +283,6 @@ class WallshiftApplet extends Applet.IconApplet {
             }
             if (this._getTotalImageCount() === 0) {
                 Utils.warn('No images found in any configured folder');
-                this.set_applet_tooltip(
-                    _('Wallshift \u2014 No images found. Right-click \u2192 Configure.'));
             }
             if (onDone) onDone();
         };
@@ -452,14 +453,25 @@ class WallshiftApplet extends Applet.IconApplet {
     }
 
     // Apply a specific image to one monitor, leaving all others at their current image.
+    // In Sync mode every enabled monitor shows the same image, so the image goes to
+    // all of them (a carousel click is the only caller that reaches here in Sync mode).
     _applyImageToMonitor(monitorName, path) {
         if (this._compositeInProgress) return;
         let allMonitors = this._monitorManager.getMonitors();
         let assignments = {};
         let monImages   = {};
 
-        assignments[monitorName] = this._assignment(monitorName, path);
-        monImages[monitorName]   = path;
+        let targets = [monitorName];
+        if (this._syncMode) {
+            let enabled = allMonitors
+                .filter(m => this._getSlotConfig(m.name).enabled)
+                .map(m => m.name);
+            if (enabled.length > 0) targets = enabled;
+        }
+        for (let name of targets) {
+            assignments[name] = this._assignment(name, path);
+            monImages[name]   = path;
+        }
 
         // All other monitors keep their current image — recorded so the resulting
         // history snapshot captures the full desktop, not just the changed monitor.
@@ -933,18 +945,18 @@ class WallshiftApplet extends Applet.IconApplet {
 
     _onPauseToggled(paused) {
         this._stateManager.setPaused(paused);
-        if (paused) {
-            this._stopTimer();
-            this.set_applet_icon_symbolic_name('media-playback-pause-symbolic');
-        } else {
-            this.set_applet_icon_symbolic_name('preferences-desktop-wallpaper-symbolic');
-            this._startTimer();
-        }
+        if (paused) this._stopTimer();
+        else        this._startTimer();
+        this._updatePanelIcon();
+    }
+
+    _updatePanelIcon() {
+        this.set_applet_icon_symbolic_name(
+            this._stateManager.isPaused() ? ICON_PAUSED : ICON_NORMAL);
     }
 
     _updateTooltip() {
-        let count = this._getTotalImageCount();
-        this.set_applet_tooltip('Wallshift \u2014 ' + count + ' images available');
+        this.set_applet_tooltip(Utils.tooltipText(this._getTotalImageCount()));
     }
 
     // ── Applet lifecycle ───────────────────────────────────────────────────────

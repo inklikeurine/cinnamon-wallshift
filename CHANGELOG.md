@@ -3,6 +3,26 @@
 All notable changes to Wallshift are recorded here.
 Versions follow `metadata.json` (`version`).
 
+## [0.0.4] — 2026-10-12
+
+Bug-fix release from the UI review.
+
+### Fixed
+- The panel icon showed the normal wallpaper icon after a reload or login even
+  when rotation was paused; it now shows the pause icon whenever rotation is paused.
+- An interval of 0 minutes was treated as 5 minutes, so "0 min 30 s" rotated every
+  5 min 30 s. 0 minutes now means "seconds only", as the setting says (minimum 10 s).
+- In Sync mode, clicking a carousel thumbnail changed only that monitor and broke
+  sync. The image now goes to every enabled monitor.
+- The carousel's dark-theme check could not fall back to the theme name (a missing
+  import), so dark themes with a transparent panel got the light buttons.
+- The tooltip said "1 images available", and restoring a saved image replaced the
+  "No images found" hint with "0 images available". Both fixed.
+- *System Settings → Applets → Configure* opened Cinnamon's generic settings window
+  instead of Wallshift's own, so there were two different settings windows. Both
+  entry points now open the same `configure.py` dialog.
+- A carousel padding value without a unit was ignored by the theme engine.
+
 ## [0.0.3] — 2026-09-13
 
 Bug-fix release: the applet now cleans up after itself when removed or reloaded,

@@ -26,7 +26,6 @@ Purely local — no downloads, no internet.
 ## Requirements
 
 - Cinnamon 6.6+ on X11 (Linux Mint 22.3+). Wayland sessions are not supported.
-  (`metadata.json` still declares Cinnamon 5.0 and up; only 6.6 is tested.)
 - **ImageMagick** (`convert`) for multi-monitor compositing and carousel thumbnails:
   `sudo apt install imagemagick`. Single-monitor use works without it; with two or
   more monitors and no ImageMagick, only the first monitor's image is applied.
@@ -71,6 +70,9 @@ Folders are scanned recursively; hidden files are skipped.
   in a folder are picked up on the next rescan (startup or a settings change), not
   immediately.
 - Trash uses `gio trash`, never `rm`; Favorites copies the file.
+- Settings open in Wallshift's own window (`configure.py`) from both the applet's
+  right-click *Configure…* and *System Settings → Applets*. `metadata.json` names it
+  in `external-configuration-app` so there is only ever one settings window.
 
 ## AI-generated
 

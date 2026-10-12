@@ -124,3 +124,20 @@ var absoluteDirOr = function(path, fallback, what) {
     if (path) warn(what + ' is not an absolute path ("' + path + '") — using ' + fallback);
     return fallback;
 };
+
+// Rotation interval in seconds from the two interval settings. 0 minutes is a
+// real value ("use seconds only"), so only a missing setting falls back to the
+// 5-minute default. Never below 10 s, to avoid back-to-back ImageMagick runs.
+var MIN_INTERVAL_SECONDS = 10;
+var intervalSeconds = function(minutes, seconds) {
+    let m = Number.isFinite(minutes) ? minutes : 5;
+    let s = Number.isFinite(seconds) ? seconds : 0;
+    return Math.max(MIN_INTERVAL_SECONDS, m * 60 + s);
+};
+
+// Panel tooltip for a total of `count` images across the active pools.
+var tooltipText = function(count) {
+    if (!count) return _('Wallshift — No images found. Right-click → Configure.');
+    return _('Wallshift') + ' — ' + imports.gettext.ngettext(
+        '%d image available', '%d images available', count).replace('%d', count);
+};
