@@ -2,8 +2,8 @@
 //
 // Cache directory: ~/.local/share/wallshift/thumbnails/
 // Cache key: MD5 of the absolute image path + size suffix + '.jpg'
-//   Landscape: _l250 (250×140 px)
-//   Portrait:  _p250 (140×250 px)
+//   250×140 (landscape, medium): _l250    140×250 (portrait, medium): _p250
+//   any other size W×H:          _WxH     (the carousel's small / large sizes)
 // Max concurrent ImageMagick jobs: 4 (queues excess requests, never drops them)
 
 const GLib = imports.gi.GLib;
@@ -12,6 +12,13 @@ const Gio  = imports.gi.Gio;
 const Utils = require('./modules/Utils');   // relative to the applet dir, as in applet.js
 
 const MAX_CONCURRENT = 4;
+
+// The medium sizes keep their pre-0.1.0 suffixes so existing caches stay valid.
+function sizeSuffix(w, h) {
+    if (w === 250 && h === 140) return '_l250';
+    if (w === 140 && h === 250) return '_p250';
+    return '_' + w + 'x' + h;
+}
 
 var ThumbnailCache = class ThumbnailCache {
 
@@ -34,13 +41,12 @@ var ThumbnailCache = class ThumbnailCache {
         this._inFlight.clear();
     }
 
-    // Returns the expected cache path for a given image and orientation.
+    // Returns the expected cache path for an image at w×h px.
     // Does NOT check whether the file exists — use ensureThumbnail for that.
-    getThumbnailPath(imagePath, isPortrait) {
-        let hash   = GLib.compute_checksum_for_string(
+    getThumbnailPath(imagePath, w, h) {
+        let hash = GLib.compute_checksum_for_string(
             GLib.ChecksumType.MD5, imagePath, -1);
-        let suffix = isPortrait ? '_p250' : '_l250';
-        return this._cacheDir + '/' + hash + suffix + '.jpg';
+        return this._cacheDir + '/' + hash + sizeSuffix(w, h) + '.jpg';
     }
 
     // Ensures a thumbnail exists for the given image.
@@ -50,22 +56,22 @@ var ThumbnailCache = class ThumbnailCache {
     // in flight, the callback is queued on that job rather than spawning a duplicate.
     //
     // callback: function(err, cachePath)
-    ensureThumbnail(imagePath, isPortrait, callback) {
-        let cachePath = this.getThumbnailPath(imagePath, isPortrait);
+    ensureThumbnail(imagePath, w, h, callback) {
+        let cachePath = this.getThumbnailPath(imagePath, w, h);
 
         if (Utils.fileExists(cachePath) && this._cacheFileValid(cachePath)) {
             callback(null, cachePath);
             return;
         }
 
-        // Piggyback on an existing in-flight job for the same path.
-        if (this._inFlight.has(imagePath)) {
-            this._inFlight.get(imagePath).push(callback);
+        // Piggyback on an existing in-flight job for the same file.
+        if (this._inFlight.has(cachePath)) {
+            this._inFlight.get(cachePath).push(callback);
             return;
         }
 
         // Queue for later dispatch.
-        this._queue.push({ imagePath, isPortrait, cachePath, callbacks: [callback] });
+        this._queue.push({ imagePath, w, h, cachePath, callbacks: [callback] });
         this._drain();
     }
 
@@ -74,7 +80,7 @@ var ThumbnailCache = class ThumbnailCache {
     _drain() {
         while (this._activeJobs < MAX_CONCURRENT && this._queue.length > 0) {
             let job = this._queue.shift();
-            this._inFlight.set(job.imagePath, job.callbacks);
+            this._inFlight.set(job.cachePath, job.callbacks);
             this._activeJobs++;
             this._runJob(job);
         }
@@ -93,9 +99,7 @@ var ThumbnailCache = class ThumbnailCache {
     }
 
     _runJob(job) {
-        let w    = job.isPortrait ? '140' : '250';
-        let h    = job.isPortrait ? '250' : '140';
-        let size = w + 'x' + h;
+        let size = job.w + 'x' + job.h;
 
         Utils.spawnAsync([
             'convert', job.imagePath,
@@ -108,8 +112,8 @@ var ThumbnailCache = class ThumbnailCache {
         ], (err, _stdout, stderr, exitCode) => {
             this._activeJobs--;
             if (this._destroyed) return;
-            let callbacks = this._inFlight.get(job.imagePath) || [];
-            this._inFlight.delete(job.imagePath);
+            let callbacks = this._inFlight.get(job.cachePath) || [];
+            this._inFlight.delete(job.cachePath);
 
             if (err || exitCode !== 0) {
                 Utils.warn('Thumbnail failed for ' + job.imagePath +

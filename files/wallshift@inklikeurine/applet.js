@@ -8,8 +8,12 @@ const Applet    = imports.ui.applet;
 const PopupMenu = imports.ui.popupMenu;
 const Settings  = imports.ui.settings;
 const Main      = imports.ui.main;
+const MessageTray = imports.ui.messageTray;
 const GLib      = imports.gi.GLib;
 const Gio       = imports.gi.Gio;
+const St        = imports.gi.St;
+const Clutter   = imports.gi.Clutter;
+const Pango     = imports.gi.Pango;
 
 // Local modules, loaded through Cinnamon's own require() so that reloading the
 // applet re-evaluates them as well. (The GJS importer — the search path plus
@@ -28,8 +32,27 @@ const ThumbnailCache  = require('./modules/ThumbnailCache').ThumbnailCache;
 const normalizePath = Utils.normalizePath;
 const absoluteDirOr = Utils.absoluteDirOr;
 
+// Strings go through the applet's own gettext domain (Utils._).
+const _ = Utils._;
+
 const ICON_NORMAL = 'preferences-desktop-wallpaper-symbolic';
 const ICON_PAUSED = 'media-playback-pause-symbolic';
+
+// Symbolic icons for the menu rows (all present in Adwaita, Mint-Y's fallback).
+const ICONS = {
+    next:     'go-next-symbolic',
+    previous: 'go-previous-symbolic',
+    pause:    'media-playback-pause-symbolic',
+    swap:     'object-flip-horizontal-symbolic',
+    monitor:  'video-display-symbolic',
+    carousel: 'view-grid-symbolic',
+    favorite: 'non-starred-symbolic',
+    starred:  'starred-symbolic',
+    trash:    'user-trash-symbolic',
+    viewer:   'image-x-generic-symbolic',
+    refresh:  'view-refresh-symbolic',
+    folder:   'folder-open-symbolic',
+};
 
 class WallshiftApplet extends Applet.IconApplet {
 
@@ -46,6 +69,8 @@ class WallshiftApplet extends Applet.IconApplet {
         // ── Runtime state ──────────────────────────────────────────────────────
         this._destroyed            = false;  // set by on_applet_removed_from_panel()
         this._timerId              = null;
+        this._timerStartedAt       = 0;      // GLib monotonic µs when the timer was armed
+        this._timerInterval        = 0;      // seconds
         this._compositeInProgress  = false;
         this._pendingChange        = false;
         this._historyPosition      = 0;
@@ -90,6 +115,7 @@ class WallshiftApplet extends Applet.IconApplet {
         this._thumbnailCache  = new ThumbnailCache(this._stateDir);
         this._carouselManager = new CarouselManager(
             this._stateManager, this._thumbnailCache, this);
+        this._carouselManager.setOptions(this._carouselOptions());
 
         // ── Panel menu ─────────────────────────────────────────────────────────
         this.menuManager = new PopupMenu.PopupMenuManager(this);
@@ -97,10 +123,14 @@ class WallshiftApplet extends Applet.IconApplet {
         this.menuManager.addMenu(this.menu);
         this._buildMenu();
 
+        // ── Panel icon: scroll = previous / next; tooltip refreshed on hover ───
+        this._scrollSigId = this.actor.connect('scroll-event', (_a, e) => this._onPanelScroll(e));
+        this._enterSigId  = this.actor.connect('enter-event', () => { this._updateTooltip(); });
+
         // ── Monitor detection (async) ──────────────────────────────────────────
         this._monitorManager = new MonitorManager(this);
         this._monitorManager.init(monitors => this._onMonitorsReady(monitors),
-            this._detectionInterval);
+            this._detectionInterval, this._detectionPollEnabled !== false);
 
     }
 
@@ -126,14 +156,38 @@ class WallshiftApplet extends Applet.IconApplet {
         this._settings.bind('interval-seconds',   '_intervalSeconds',   rebuildTimer);
         this._settings.bind('image-order',        '_imageOrder',        rebuildAndChange);
         this._settings.bind('show-notifications', '_showNotifications', null);
-        this._settings.bind('favorites-folder',   '_favoritesFolder',   null);
+        this._settings.bind('favorites-folder',   '_favoritesFolder',   () => {
+            if (this._carouselManager) this._carouselManager.refreshFavorite();
+        });
         this._settings.bind('sync-mode',     '_syncMode',     rebuildAndChange);
         this._settings.bind('global-folder', '_globalFolder', rebuildAndChange);
-        this._settings.bind('detection-interval-minutes', '_detectionInterval', () => {
+        let repoll = () => {
             if (this._monitorManager)
-                this._monitorManager.setPollInterval(this._detectionInterval);
-        });
+                this._monitorManager.setPollInterval(this._detectionInterval,
+                    this._detectionPollEnabled !== false);
+        };
+        this._settings.bind('detection-interval-minutes', '_detectionInterval', repoll);
+        this._settings.bind('detection-poll-enabled', '_detectionPollEnabled', repoll);
 
+        let carousel = () => {
+            if (this._carouselManager) this._carouselManager.setOptions(this._carouselOptions());
+        };
+        this._settings.bind('carousel-edge',          '_carouselEdge',        carousel);
+        this._settings.bind('carousel-thumb-size',    '_carouselThumbSize',   carousel);
+        this._settings.bind('carousel-file-names',    '_carouselFileNames',   carousel);
+        this._settings.bind('carousel-close-on-pick', '_carouselCloseOnPick', carousel);
+
+    }
+
+    _carouselOptions() {
+        return {
+            edge:        this._carouselEdge === 'top' ? 'top' : 'bottom',
+            thumbSize:   ['small', 'medium', 'large'].includes(this._carouselThumbSize)
+                             ? this._carouselThumbSize : 'medium',
+            fileNames:   ['hover', 'always', 'never'].includes(this._carouselFileNames)
+                             ? this._carouselFileNames : 'hover',
+            closeOnPick: !!this._carouselCloseOnPick,
+        };
     }
 
     // Opens configure.py — the single settings window for this applet.
@@ -306,6 +360,8 @@ class WallshiftApplet extends Applet.IconApplet {
         this._stopTimer();
         let interval = this._getIntervalSeconds();
         if (interval <= 0) return;
+        this._timerStartedAt = GLib.get_monotonic_time();
+        this._timerInterval  = interval;
         this._timerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, interval, () => {
             if (!this._stateManager.isPaused()) {
                 this._historyPosition = 0;
@@ -320,6 +376,7 @@ class WallshiftApplet extends Applet.IconApplet {
             GLib.source_remove(this._timerId);
             this._timerId = null;
         }
+        this._timerStartedAt = 0;
     }
 
     _resetTimer() {
@@ -551,6 +608,12 @@ class WallshiftApplet extends Applet.IconApplet {
                 this._applyWallpaper(outputPath, pictureOptions);
 
                 if (isNewChange && monitorImages) {
+                    // Monitors whose image actually changed (the rest were carried forward).
+                    let changed = monitors.filter(m => {
+                        if (!monitorImages[m.name]) return false;
+                        let rec = this._stateManager.getMonitorRecord(m.name);
+                        return !rec || rec.currentImage !== monitorImages[m.name];
+                    });
                     for (let name in monitorImages) {
                         this._stateManager.setMonitorCurrentImage(name, monitorImages[name]);
                     }
@@ -565,10 +628,10 @@ class WallshiftApplet extends Applet.IconApplet {
                     }
 
                     if (this._showNotifications) {
-                        let names = [...new Set(
-                            Object.values(monitorImages).map(p => p.split('/').pop())
-                        )];
-                        Main.notify(_('Wallshift'), names.join(' | '));
+                        let entries = changed.map(m =>
+                            ({ displayName: m.displayName || m.name, path: monitorImages[m.name] }));
+                        if (entries.length)
+                            this._notify(_('Wallpaper changed'), Utils.changeNotificationBody(entries));
                     }
                 }
 
@@ -637,33 +700,92 @@ class WallshiftApplet extends Applet.IconApplet {
 
     // ── Per-monitor favorites & trash ──────────────────────────────────────────
 
-    _favoriteMonitorImage(monitorName) {
+    // Favorite: copy the image into the favorites folder; on an image that is
+    // already there, remove that copy (to the system trash) instead.
+    _toggleFavorite(monitorName) {
         let rec = this._stateManager.getMonitorRecord(monitorName);
         if (!rec || !rec.currentImage) {
             Utils.warn('Favorite: no current image for ' + monitorName);
             return;
         }
-        if (this._copyToFavorites(rec.currentImage)) {
-            Main.notify(_('Wallshift'),
-                _('Saved to Favorites: ') + rec.currentImage.split('/').pop());
+        let src  = rec.currentImage;
+        let name = src.split('/').pop();
+        let favDir = this._favoritesDir();
+        if (!this._isFavorite(src)) {
+            if (this._copyToFavorites(src)) {
+                this._notify(_('Wallshift'), _('Saved to Favorites: %s').replace('%s', name));
+                if (this._carouselManager) this._carouselManager.refreshFavorite();
+            }
+            return;
         }
+        // The image itself lives in the favorites folder: removing "the copy"
+        // would remove the original, so leave it alone.
+        if (src.substring(0, src.lastIndexOf('/')) === favDir) {
+            this._notify(_('Wallshift'), _('%s is in your Favorites folder').replace('%s', name));
+            return;
+        }
+        let copy = favDir + '/' + name;
+        Utils.spawnAsync(['gio', 'trash', copy], (err, _out, stderr, code) => {
+            if (this._destroyed) return;
+            if (err || code !== 0) {
+                Utils.error('gio trash failed for ' + copy + ': ' + (stderr || (err && err.message) || ''));
+                return;
+            }
+            this._notify(_('Wallshift'), _('Removed from Favorites: %s').replace('%s', name));
+            if (this._carouselManager) this._carouselManager.refreshFavorite();
+        });
+    }
+
+    _favoritesDir() {
+        return absoluteDirOr(
+            normalizePath(this._favoritesFolder || ''),
+            GLib.get_home_dir() + '/Pictures/Wallpaper Favorites',
+            'Favorites folder');
+    }
+
+    // A file of the same name in the favorites folder counts as favorited.
+    _isFavorite(path) {
+        if (!path) return false;
+        return Utils.fileExists(this._favoritesDir() + '/' + path.split('/').pop());
     }
 
     _trashMonitorImage(monitorName) {
         let rec = this._stateManager.getMonitorRecord(monitorName);
         if (!rec || !rec.currentImage) return;
+        this._notify(_('Wallshift'), _('Moved to Trash: %s').replace('%s', rec.currentImage.split('/').pop()));
         this._trashPath(rec.currentImage);
         // Advance just this monitor to the next image.
         this._changeMonitorWallpaper(monitorName);
     }
 
+    // The folder a monitor's images come from (for the carousel's empty message).
+    _folderFor(monitorName) {
+        let globalFolder = normalizePath(this._globalFolder || '');
+        let fallback = (globalFolder && Utils.dirExists(globalFolder))
+            ? globalFolder : GLib.get_home_dir() + '/Pictures';
+        if (this._syncMode) return fallback;
+        let slot = this._getSlotConfig(monitorName);
+        return (slot.folder && Utils.dirExists(slot.folder)) ? slot.folder : fallback;
+    }
+
+    // Main.notify() with the applet's icon.
+    _notify(title, body) {
+        try {
+            let source = new MessageTray.SystemNotificationSource();
+            Main.messageTray.add(source);
+            let icon = new St.Icon({ icon_name: ICON_NORMAL, icon_type: St.IconType.SYMBOLIC, icon_size: 24 });
+            let n = new MessageTray.Notification(source, title, body, { icon });
+            n.setTransient(true);
+            source.notify(n);
+        } catch(e) {
+            Main.notify(title, body);
+        }
+    }
+
     // ── Shared helpers ─────────────────────────────────────────────────────────
 
     _copyToFavorites(src) {
-        let favDir = absoluteDirOr(
-            normalizePath(this._favoritesFolder || ''),
-            GLib.get_home_dir() + '/Pictures/Wallpaper Favorites',
-            'Favorites folder');
+        let favDir = this._favoritesDir();
         try {
             Utils.ensureDir(favDir);
             let dest = favDir + '/' + src.split('/').pop();
@@ -757,6 +879,7 @@ class WallshiftApplet extends Applet.IconApplet {
     // ── Monitor topology changes ───────────────────────────────────────────────
 
     onMonitorsChanged(newMonitors) {
+        if (this._carouselManager) this._carouselManager.reopenAll(newMonitors);
         this._setupImagePools(() => {
             let assignments = this._restoreAssignments(newMonitors);
             if (Object.keys(assignments).length > 0) {
@@ -768,26 +891,29 @@ class WallshiftApplet extends Applet.IconApplet {
     }
 
     // ── Panel menu ─────────────────────────────────────────────────────────────
+    //
+    // Every action row carries a symbolic icon. Static rows (Next, Previous,
+    // Pause, Swap, Refresh, Open Image Folder) are built once; the monitor
+    // section is rebuilt on every open:
+    //   one monitor  → its items sit directly in the menu, no submenu, no Swap
+    //   Sync mode    → one "All monitors" submenu (2+ monitors share one image)
+    //   otherwise    → one submenu per monitor, "· paused" on paused ones
 
     _buildMenu() {
-        let nextItem = new PopupMenu.PopupMenuItem(_('Next Wallpaper'));
-        nextItem.connect('activate', () => this._navigateNext());
+        let nextItem = this._iconItem(_('Next Wallpaper'), ICONS.next, () => this._navigateNext());
         this.menu.addMenuItem(nextItem);
 
-        this._prevItem = new PopupMenu.PopupMenuItem(_('Previous Wallpaper'));
-        this._prevItem.connect('activate', () => this._navigatePrevious());
+        this._prevItem = this._iconItem(_('Previous Wallpaper'), ICONS.previous, () => this._navigatePrevious());
         this.menu.addMenuItem(this._prevItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        this._pauseItem = new PopupMenu.PopupSwitchMenuItem(
-            _('Pause All Rotation'), this._stateManager.isPaused());
-        this._pauseItem.connect('toggled', () =>
-            this._onPauseToggled(this._pauseItem.state));
+        this._pauseItem = new PopupMenu.PopupSwitchIconMenuItem(
+            _('Pause Rotation'), this._stateManager.isPaused(), ICONS.pause, St.IconType.SYMBOLIC);
+        this._pauseItem.connect('toggled', () => this._onPauseToggled(this._pauseItem.state));
         this.menu.addMenuItem(this._pauseItem);
 
-        this._swapItem = new PopupMenu.PopupMenuItem(_('Swap Images'));
-        this._swapItem.connect('activate', () => {
+        this._swapItem = this._iconItem(_('Swap Images'), ICONS.swap, () => {
             this.menu.close();
             this._swapImages();
         });
@@ -795,152 +921,151 @@ class WallshiftApplet extends Applet.IconApplet {
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // Per-monitor submenus — rebuilt on every open from live xrandr data.
         this._monitorSection = new PopupMenu.PopupMenuSection();
         this.menu.addMenuItem(this._monitorSection);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        let refreshItem = new PopupMenu.PopupMenuItem(_('Refresh Monitors'));
-        refreshItem.connect('activate', () => {
+        this.menu.addMenuItem(this._iconItem(_('Refresh Monitors'), ICONS.refresh, () => {
             this.menu.close();
             this._refreshMonitors();
-        });
-        this.menu.addMenuItem(refreshItem);
-
-        let openFolderItem = new PopupMenu.PopupMenuItem(_('Open Wallpaper Folder'));
-        openFolderItem.connect('activate', () => this._openCurrentFolder());
-        this.menu.addMenuItem(openFolderItem);
+        }));
+        this.menu.addMenuItem(this._iconItem(_('Open Image Folder'), ICONS.folder,
+            () => this._openCurrentFolder()));
 
         this.menu.connect('open-state-changed', (_menu, open) => {
             if (open) this._updateMenuState();
         });
     }
 
+    _iconItem(label, icon, onActivate) {
+        let item = new PopupMenu.PopupIconMenuItem(label, icon, St.IconType.SYMBOLIC);
+        item.connect('activate', onActivate);
+        return item;
+    }
+
+    // Non-clickable file-name row, cut with "…" so a long name never widens the
+    // menu; an empty icon slot keeps it lined up with the labels.
+    _fileRow(path) {
+        let name = path ? path.split('/').pop() : _('(none)');
+        let item = new PopupMenu.PopupIconMenuItem(name, null, St.IconType.SYMBOLIC, { reactive: false });
+        item.label.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+        item.label.set_style('max-width: 22em;');
+        item.label.add_style_class_name('popup-inactive-menu-item');
+        return item;
+    }
+
     _updateMenuState() {
-        let canGoBack =
-            this._stateManager.getHistoryAt(this._historyPosition + 1) !== null;
+        if (!this.menu || !this._monitorManager) return;
+        let monitors = this._monitorManager.getMonitors();
+        let single   = monitors.length === 1;
+
+        let canGoBack = this._stateManager.getHistoryAt(this._historyPosition + 1) !== null;
         this._prevItem.setSensitive(canGoBack);
         this._pauseItem.setToggleState(this._stateManager.isPaused());
 
-        // Swap is only meaningful in independent mode with 2+ monitors that have images.
-        let swappable = !this._syncMode &&
-            this._monitorManager.getMonitors().filter(m => {
-                let rec = this._stateManager.getMonitorRecord(m.name);
-                return rec && rec.currentImage;
-            }).length >= 2;
-        this._swapItem.setSensitive(swappable);
+        // Swap needs 2+ monitors with images, in independent mode; hidden with one monitor.
+        this._swapItem.actor.visible = !single;
+        this._swapItem.setSensitive(!this._syncMode && monitors.filter(m => {
+            let rec = this._stateManager.getMonitorRecord(m.name);
+            return rec && rec.currentImage;
+        }).length >= 2);
 
-        // Rebuild per-monitor submenus with live monitor list from xrandr.
         this._monitorSection.removeAll();
-
-        let monitors = this._monitorManager.getMonitors();
         if (monitors.length === 0) {
             this._monitorSection.addMenuItem(
-                new PopupMenu.PopupMenuItem(_('(no monitors detected)'),
-                    {reactive: false}));
+                new PopupMenu.PopupMenuItem(_('(no monitors detected)'), { reactive: false }));
+            return;
+        }
+
+        if (single) {
+            this._addImageItems(this._monitorSection, monitors[0], { carouselLabel: _('Carousel') });
+            return;
+        }
+
+        if (this._syncMode) {
+            let target = monitors.find(m => m.primary) || monitors[0];
+            let sub = this._subMenu(_('All monitors'), ICONS.monitor);
+            this._addImageItems(sub.menu, target, {
+                carouselLabel: _('Carousel (on %s)').replace('%s', target.displayName) });
+            this._monitorSection.addMenuItem(sub);
             return;
         }
 
         for (let mon of monitors) {
-            let monName  = mon.name;   // capture for closures
-            let rec      = this._stateManager.getMonitorRecord(monName);
-            let imgName  = (rec && rec.currentImage)
-                ? rec.currentImage.split('/').pop()
-                : _('(none)');
-            let isPaused = this._stateManager.isMonitorPaused(monName);
-
-            // Use EDID display name ("Acer CB272U") with connector name in parens.
-            // mon.name is still used for all logic — it's the stable identifier.
+            let monName = mon.name;   // the stable identifier; displayName is the EDID name
             let label = mon.displayName +
                 (mon.displayName !== monName ? ' (' + monName + ')' : '') +
-                (mon.primary ? ' \u2605' : '');
-            let sub   = new PopupMenu.PopupSubMenuMenuItem(label);
-
-            // ── Carousel toggle ───────────────────────────────────────────────
-            let carouselLabel = this._carouselManager.isOpen(monName)
-                ? _('Hide Carousel') : _('Show Carousel');
-            let carouselItem = new PopupMenu.PopupMenuItem(carouselLabel);
-            carouselItem.connect('activate', () => {
-                this.menu.close();
-                if (this._carouselManager.isOpen(monName)) {
-                    this._carouselManager.closeCarousel(monName);
-                } else {
-                    this._carouselManager.openCarousel(mon);
-                }
-            });
-            sub.menu.addMenuItem(carouselItem);
-            sub.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-            // Current image (non-interactive info label)
-            let infoItem = new PopupMenu.PopupMenuItem(imgName, {reactive: false});
-            sub.menu.addMenuItem(infoItem);
-
-            sub.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-            if (!this._syncMode) {
-                // ── Navigation ────────────────────────────────────────────────
-                let nextItem = new PopupMenu.PopupMenuItem(_('Next Image'));
-                nextItem.connect('activate', () => {
-                    this.menu.close();
-                    this._changeMonitorWallpaper(monName);
-                });
-                sub.menu.addMenuItem(nextItem);
-
-                let prevItem = new PopupMenu.PopupMenuItem(_('Previous Image'));
-                prevItem.connect('activate', () => {
-                    this.menu.close();
-                    this._navigateMonitorPrevious(monName);
-                });
-                sub.menu.addMenuItem(prevItem);
-
-                sub.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-                // ── Per-monitor pause ─────────────────────────────────────────
-                let pauseItem = new PopupMenu.PopupSwitchMenuItem(
-                    _('Pause Rotation'), isPaused);
-                pauseItem.connect('toggled', () => {
-                    this._stateManager.setMonitorPaused(monName, pauseItem.state);
-                });
-                sub.menu.addMenuItem(pauseItem);
-            } else {
-                let syncNote = new PopupMenu.PopupMenuItem(
-                    _('(synced \u2014 all monitors share one image)'),
-                    {reactive: false});
-                sub.menu.addMenuItem(syncNote);
-            }
-
-            sub.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-            // ── Favorite ──────────────────────────────────────────────────────
-            let favItem = new PopupMenu.PopupMenuItem(_('Favorite This Image'));
-            favItem.connect('activate', () => {
-                this.menu.close();
-                this._favoriteMonitorImage(monName);
-            });
-            sub.menu.addMenuItem(favItem);
-
-            // ── Trash ─────────────────────────────────────────────────────────
-            let trashItem = new PopupMenu.PopupMenuItem(_('Trash This Image'));
-            trashItem.connect('activate', () => {
-                this.menu.close();
-                this._trashMonitorImage(monName);
-            });
-            sub.menu.addMenuItem(trashItem);
-
-            sub.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-            // ── Open in viewer ────────────────────────────────────────────────
-            let openItem = new PopupMenu.PopupMenuItem(_('Open in Image Viewer'));
-            openItem.connect('activate', () => {
-                this.menu.close();
-                let r = this._stateManager.getMonitorRecord(monName);
-                this._openImageInViewer(r ? r.currentImage : null);
-            });
-            sub.menu.addMenuItem(openItem);
-
+                (mon.primary ? ' ★' : '');
+            if (this._stateManager.isMonitorPaused(monName)) label += ' · ' + _('paused');
+            let sub = this._subMenu(label, ICONS.monitor);
+            this._addImageItems(sub.menu, mon, { carouselLabel: _('Carousel'), perMonitor: true });
             this._monitorSection.addMenuItem(sub);
         }
+    }
+
+    _subMenu(label, icon) {
+        let sub = new PopupMenu.PopupSubMenuMenuItem(label);
+        sub.addActor(new St.Icon({ style_class: 'popup-menu-icon', icon_name: icon,
+                                   icon_type: St.IconType.SYMBOLIC }), { span: 0, position: 0 });
+        return sub;
+    }
+
+    // The image actions for one monitor. perMonitor adds that monitor's own
+    // Next / Previous / Pause (left out when they would repeat the top rows).
+    _addImageItems(menu, mon, opts) {
+        let monName = mon.name;
+        let rec     = this._stateManager.getMonitorRecord(monName);
+        let current = rec ? rec.currentImage : null;
+
+        let carousel = new PopupMenu.PopupSwitchIconMenuItem(opts.carouselLabel,
+            this._carouselManager.isOpen(monName), ICONS.carousel, St.IconType.SYMBOLIC);
+        carousel.connect('toggled', () => {
+            this.menu.close();
+            if (carousel.state) this._carouselManager.openCarousel(mon);
+            else                this._carouselManager.closeCarousel(monName);
+        });
+        menu.addMenuItem(carousel);
+        menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        menu.addMenuItem(this._fileRow(current));
+
+        if (opts.perMonitor) {
+            menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            menu.addMenuItem(this._iconItem(_('Next Image'), ICONS.next, () => {
+                this.menu.close();
+                this._changeMonitorWallpaper(monName);
+            }));
+            menu.addMenuItem(this._iconItem(_('Previous Image'), ICONS.previous, () => {
+                this.menu.close();
+                this._navigateMonitorPrevious(monName);
+            }));
+            let pause = new PopupMenu.PopupSwitchIconMenuItem(_('Pause Rotation'),
+                this._stateManager.isMonitorPaused(monName), ICONS.pause, St.IconType.SYMBOLIC);
+            pause.connect('toggled', () => {
+                this._stateManager.setMonitorPaused(monName, pause.state);
+                this._updateTooltip();
+            });
+            menu.addMenuItem(pause);
+        }
+
+        menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        let fav = current && this._isFavorite(current);
+        menu.addMenuItem(this._iconItem(fav ? _('Remove from Favorites') : _('Favorite This Image'),
+            fav ? ICONS.starred : ICONS.favorite, () => {
+                this.menu.close();
+                this._toggleFavorite(monName);
+            }));
+        menu.addMenuItem(this._iconItem(_('Trash This Image'), ICONS.trash, () => {
+            this.menu.close();
+            this._trashMonitorImage(monName);
+        }));
+        menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        menu.addMenuItem(this._iconItem(_('Open in Image Viewer'), ICONS.viewer, () => {
+            this.menu.close();
+            let r = this._stateManager.getMonitorRecord(monName);
+            this._openImageInViewer(r ? r.currentImage : null);
+        }));
     }
 
     _onPauseToggled(paused) {
@@ -948,6 +1073,7 @@ class WallshiftApplet extends Applet.IconApplet {
         if (paused) this._stopTimer();
         else        this._startTimer();
         this._updatePanelIcon();
+        this._updateTooltip();
     }
 
     _updatePanelIcon() {
@@ -955,14 +1081,44 @@ class WallshiftApplet extends Applet.IconApplet {
             this._stateManager.isPaused() ? ICON_PAUSED : ICON_NORMAL);
     }
 
+    // Rebuilt on every pointer entry, so "next change in …" is current without a timer.
     _updateTooltip() {
-        this.set_applet_tooltip(Utils.tooltipText(this._getTotalImageCount()));
+        if (!this._stateManager) return;
+        let pausedNames = [];
+        if (this._monitorManager && !this._syncMode) {
+            for (let m of this._monitorManager.getMonitors())
+                if (this._stateManager.isMonitorPaused(m.name)) pausedNames.push(m.displayName);
+        }
+        this.set_applet_tooltip(Utils.tooltipText({
+            count:       this._getTotalImageCount(),
+            paused:      this._stateManager.isPaused(),
+            pausedNames,
+            secondsLeft: this._timerId
+                ? Utils.secondsUntilNext(this._timerStartedAt, this._timerInterval, GLib.get_monotonic_time())
+                : null,
+        }));
+    }
+
+    // Scroll on the panel icon: up = previous, down = next. Ignored while a
+    // composite is being built, so a fast scroll cannot pile up ImageMagick runs.
+    _onPanelScroll(event) {
+        if (this._compositeInProgress || !this._monitorsReady) return Clutter.EVENT_STOP;
+        let dir = event.get_scroll_direction();
+        if (dir === Clutter.ScrollDirection.UP)        this._navigatePrevious();
+        else if (dir === Clutter.ScrollDirection.DOWN) this._navigateNext();
+        return Clutter.EVENT_STOP;
     }
 
     // ── Applet lifecycle ───────────────────────────────────────────────────────
 
     on_applet_clicked() {
         this.menu.toggle();
+    }
+
+    // Middle-click: pause / resume rotation.
+    on_applet_middle_clicked() {
+        if (!this._stateManager) return;
+        this._onPauseToggled(!this._stateManager.isPaused());
     }
 
     // Cinnamon calls this when the applet is removed from a panel and, before
@@ -977,6 +1133,8 @@ class WallshiftApplet extends Applet.IconApplet {
         this._pendingChange = false;
 
         this._stopTimer();
+        if (this._scrollSigId) { this.actor.disconnect(this._scrollSigId); this._scrollSigId = 0; }
+        if (this._enterSigId)  { this.actor.disconnect(this._enterSigId);  this._enterSigId  = 0; }
         if (this._monitorConfigTimer) {
             GLib.source_remove(this._monitorConfigTimer);
             this._monitorConfigTimer = null;

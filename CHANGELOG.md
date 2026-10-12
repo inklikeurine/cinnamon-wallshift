@@ -3,6 +3,62 @@
 All notable changes to Wallshift are recorded here.
 Versions follow `metadata.json` (`version`).
 
+## [0.1.0] — 2026-10-12
+
+UI polish: a reworked carousel, a tidier panel menu and settings window, and the
+whole applet following the system theme.
+
+### Added
+- **Carousel tab.** The controls (hide, favorite, trash, close) sit in a tab grown
+  out of the strip, on its side facing into the desktop. Collapsing folds the strip
+  away and leaves only the tab.
+- **Carousel settings** (new *Carousel* section): come in from the top or bottom
+  edge (left or right on a portrait monitor), thumbnail size (small / medium /
+  large), file names on hover / always / never, and close after choosing an image.
+- The carousel keeps clear of panels on its edge, including ones that auto-hide or
+  intellihide, so a panel sliding out never covers it.
+- File name on hover, tooltips on every carousel button, a check badge on the
+  current image, a loading icon on thumbnails still being made, and a message
+  instead of an empty strip when a folder has no images.
+- The favorite button shows a filled star when the image is already in the
+  favorites folder; clicking it again removes that copy (to the system trash).
+  The menu item reads *Remove from Favorites* in that case.
+- Panel tooltip shows when the next change is due, the image count and which
+  monitors are paused.
+- Scroll on the panel icon for the previous / next wallpaper; middle-click to pause
+  or resume.
+- A switch to turn off the periodic monitor re-check (*Settings → Monitors*).
+- *Trash This Image* shows a notification saying what was moved to the trash.
+- Translatable strings in the applet and the settings window, with a
+  `po/wallshift@inklikeurine.pot` template.
+- `icon.png` for System Settings and the Spices site.
+
+### Changed
+- **Everything follows the system theme.** The carousel takes its surface, text,
+  border and accent colours from the active Cinnamon theme and updates when the
+  theme changes; the stylesheet no longer holds any colours.
+- Panel menu: an icon on every row of every menu. With one monitor its items sit
+  directly in the menu (no submenu, no *Swap Images*); in Sync mode one *All
+  monitors* submenu replaces the identical per-monitor ones; paused monitors are
+  marked "· paused". *Show / Hide Carousel* is now a switch, long file names are cut
+  with "…", *Pause All Rotation* is *Pause Rotation*, and *Open Wallpaper Folder*
+  is *Open Image Folder* (it opens the current image's folder).
+- Settings window: Folders section first; the interval is one row with a note when
+  it is under the 10-second minimum; number fields read − n + and save shortly
+  after the last click instead of on every step; a monitor's folder can be cleared
+  back to the default; per-monitor folders are greyed out with a note in Sync mode;
+  opening Configure again brings the open window forward instead of a second one.
+- The wallpaper-change notification has a title and one line per monitor that
+  changed ("Acer CB272U: forest.jpg"), with the Wallshift icon.
+- Carousel opening and closing fade; the carousel hides while a fullscreen window
+  covers its monitor, and re-opens in the right place after monitors change.
+- On a portrait monitor the default (bottom) setting now puts the vertical strip on
+  the right edge; choose *Top edge* for the left, where it used to be.
+
+### Removed
+- The `icon` key from `metadata.json` (Spices forbids it) and `icon.svg`, replaced
+  by `icon.png`.
+
 ## [0.0.4] — 2026-10-12
 
 Bug-fix release from the UI review.

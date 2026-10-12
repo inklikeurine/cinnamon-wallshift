@@ -135,9 +135,72 @@ var intervalSeconds = function(minutes, seconds) {
     return Math.max(MIN_INTERVAL_SECONDS, m * 60 + s);
 };
 
-// Panel tooltip for a total of `count` images across the active pools.
-var tooltipText = function(count) {
-    if (!count) return _('Wallshift — No images found. Right-click → Configure.');
-    return _('Wallshift') + ' — ' + imports.gettext.ngettext(
-        '%d image available', '%d images available', count).replace('%d', count);
+// ── Translations ───────────────────────────────────────────────────────────────
+// Strings go through the applet's own gettext domain (po/ next to applet.js,
+// installed to ~/.local/share/locale), falling back to Cinnamon's catalogue.
+
+var UUID = 'wallshift@inklikeurine';
+const Gettext = imports.gettext;
+Gettext.bindtextdomain(UUID, GLib.get_home_dir() + '/.local/share/locale');
+
+var _ = function(str) {
+    let t = Gettext.dgettext(UUID, str);
+    if (t !== str) return t;
+    return typeof globalThis._ === 'function' ? globalThis._(str) : str;
+};
+
+var ngettext = function(singular, plural, n) {
+    return Gettext.dngettext(UUID, singular, plural, n);
+};
+
+// ── Panel tooltip ──────────────────────────────────────────────────────────────
+
+// "45 s", "3 min", "1 h 5 min" — rounded up to the next minute past 60 s, so
+// "next change in 1 min" never shows while 90 s are still left.
+var formatDuration = function(seconds) {
+    seconds = Math.max(0, Math.round(seconds));
+    if (seconds < 60) return ngettext('%d s', '%d s', seconds).replace('%d', seconds);
+    let minutes = Math.ceil(seconds / 60);
+    if (minutes < 60) return ngettext('%d min', '%d min', minutes).replace('%d', minutes);
+    let h = Math.floor(minutes / 60), m = minutes % 60;
+    let hours = ngettext('%d h', '%d h', h).replace('%d', h);
+    return m ? hours + ' ' + ngettext('%d min', '%d min', m).replace('%d', m) : hours;
+};
+
+// Two-line panel tooltip. state: { count, paused, pausedNames[], secondsLeft }
+// secondsLeft is null while no timer runs yet (startup, monitors not ready).
+var tooltipText = function(state) {
+    let count = state.count || 0;
+    if (!count) return _('Wallshift \u2014 No images found. Right-click \u2192 Configure.');
+    let first = _('Wallshift');
+    if (state.paused)
+        first += ' \u2014 ' + _('paused');
+    else if (state.secondsLeft !== null && state.secondsLeft !== undefined)
+        first += ' \u2014 ' + _('next change in %s').replace('%s', formatDuration(state.secondsLeft));
+    let second = ngettext('%d image', '%d images', count).replace('%d', count);
+    let names = state.paused ? [] : (state.pausedNames || []);
+    if (names.length)
+        second += ' \u00b7 ' + _('%s paused').replace('%s', names.join(', '));
+    return first + '\n' + second;
+};
+
+// Seconds until a repeating timer of `interval` s, armed at `startedUs`
+// (GLib monotonic µs), fires next.
+var secondsUntilNext = function(startedUs, interval, nowUs) {
+    if (!startedUs || !interval) return null;
+    let elapsed = Math.max(0, (nowUs - startedUs) / 1e6);
+    let left = interval - (elapsed % interval);
+    return left;
+};
+
+// ── Change notification ────────────────────────────────────────────────────────
+
+// Body of the "Wallpaper changed" notification: one line per monitor that got a
+// new image, "Display Name: file.jpg". The same image on every monitor (Sync
+// mode) is one line.  entries: [{ displayName, path }]
+var changeNotificationBody = function(entries) {
+    let files = entries.map(e => e.path.split('/').pop());
+    if (entries.length > 1 && files.every(f => f === files[0]))
+        return _('%s (all monitors)').replace('%s', files[0]);
+    return entries.map((e, i) => e.displayName + ': ' + files[i]).join('\n');
 };

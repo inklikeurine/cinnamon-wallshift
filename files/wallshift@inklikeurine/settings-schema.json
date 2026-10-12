@@ -1,34 +1,57 @@
 {
   "layout": {
     "type": "layout",
-    "pages": ["page-general"],
+    "pages": [
+      "page-general"
+    ],
     "page-general": {
       "type": "page",
       "title": "General",
-      "sections": ["section-timing", "section-display", "section-sync", "section-detection"]
+      "sections": [
+        "section-folders",
+        "section-rotation",
+        "section-carousel",
+        "section-monitors"
+      ]
     },
-    "section-timing": {
+    "section-folders": {
       "type": "section",
-      "title": "Change Interval",
-      "keys": ["interval-minutes", "interval-seconds"]
+      "title": "Folders",
+      "keys": [
+        "global-folder",
+        "favorites-folder"
+      ]
     },
-    "section-detection": {
+    "section-rotation": {
       "type": "section",
-      "title": "Monitor Detection",
-      "keys": ["detection-interval-minutes"]
+      "title": "Rotation",
+      "keys": [
+        "interval-minutes",
+        "interval-seconds",
+        "image-order",
+        "show-notifications"
+      ]
     },
-    "section-display": {
+    "section-carousel": {
       "type": "section",
-      "title": "Display",
-      "keys": ["image-order", "show-notifications", "global-folder", "favorites-folder"]
+      "title": "Carousel",
+      "keys": [
+        "carousel-edge",
+        "carousel-thumb-size",
+        "carousel-file-names",
+        "carousel-close-on-pick"
+      ]
     },
-    "section-sync": {
+    "section-monitors": {
       "type": "section",
-      "title": "Sync Mode",
-      "keys": ["sync-mode"]
+      "title": "Monitors",
+      "keys": [
+        "sync-mode",
+        "detection-poll-enabled",
+        "detection-interval-minutes"
+      ]
     }
   },
-
   "interval-minutes": {
     "type": "spinbutton",
     "default": 5,
@@ -54,7 +77,8 @@
     "max": 1440,
     "step": 1,
     "units": "minutes",
-    "description": "Re-check for monitor / port changes every (minutes)"
+    "description": "Re-check for monitor / port changes every (minutes)",
+    "dependency": "detection-poll-enabled"
   },
   "image-order": {
     "type": "combobox",
@@ -87,5 +111,44 @@
     "type": "switch",
     "default": false,
     "description": "Same image on all monitors (uses the default wallpaper folder above)"
+  },
+  "detection-poll-enabled": {
+    "type": "switch",
+    "default": true,
+    "description": "Re-check for monitor changes on a timer"
+  },
+  "carousel-edge": {
+    "type": "combobox",
+    "default": "bottom",
+    "options": {
+      "Bottom edge": "bottom",
+      "Top edge": "top"
+    },
+    "description": "Carousel comes in from the (left or right on a portrait monitor)"
+  },
+  "carousel-thumb-size": {
+    "type": "combobox",
+    "default": "medium",
+    "options": {
+      "Small": "small",
+      "Medium": "medium",
+      "Large": "large"
+    },
+    "description": "Thumbnail size"
+  },
+  "carousel-file-names": {
+    "type": "combobox",
+    "default": "hover",
+    "options": {
+      "On hover": "hover",
+      "Always": "always",
+      "Never": "never"
+    },
+    "description": "Show file names on thumbnails"
+  },
+  "carousel-close-on-pick": {
+    "type": "switch",
+    "default": false,
+    "description": "Close the carousel after choosing an image"
   }
 }

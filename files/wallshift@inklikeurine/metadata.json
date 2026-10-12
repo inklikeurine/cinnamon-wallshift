@@ -2,9 +2,10 @@
   "uuid": "wallshift@inklikeurine",
   "name": "Wallshift",
   "description": "Rotates wallpapers from local folders with multi-monitor support",
-  "version": "0.0.4",
-  "cinnamon-version": ["6.6"],
+  "version": "0.1.0",
+  "cinnamon-version": [
+    "6.6"
+  ],
   "max-instances": 1,
-  "external-configuration-app": "configure.py",
-  "icon": "preferences-desktop-wallpaper-symbolic"
+  "external-configuration-app": "configure.py"
 }

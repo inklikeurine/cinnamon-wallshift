@@ -21,14 +21,17 @@ var MonitorManager = class MonitorManager {
         this._signalId    = null;
         this._signature   = '';
         this._pollMinutes = 30;
+        this._pollEnabled = true;
         this._pollId      = null;
     }
 
     // pollMinutes: how often to re-query the topology as a fallback for cases
     // where the 'monitors-changed' signal does not fire (e.g. ports swapped
     // between same-resolution outputs, or GDK's monitor view lagging the server).
-    init(onReady, pollMinutes) {
+    // pollEnabled false: rely on the signal (and Refresh Monitors) alone.
+    init(onReady, pollMinutes, pollEnabled) {
         if (pollMinutes) this._pollMinutes = pollMinutes;
+        if (pollEnabled === false) this._pollEnabled = false;
         this._signalId = Main.layoutManager.connect('monitors-changed',
             () => this._onMonitorsChanged());
         this._query();
@@ -50,9 +53,10 @@ var MonitorManager = class MonitorManager {
     }
 
     // Change the polling cadence at runtime (bound to the settings spinbutton).
-    setPollInterval(minutes) {
+    setPollInterval(minutes, enabled) {
         this._pollMinutes = minutes || 30;
-        this._startPolling();   // restarts the timer with the new interval
+        if (enabled !== undefined) this._pollEnabled = !!enabled;
+        this._startPolling();   // restarts (or, when disabled, just stops) the timer
     }
 
     // Force an immediate re-detection and recompose — used by the manual
@@ -154,6 +158,7 @@ var MonitorManager = class MonitorManager {
 
     _startPolling() {
         this._stopPolling();
+        if (!this._pollEnabled) return;
         let secs = Math.max(60, (this._pollMinutes || 30) * 60);
         // PRIORITY_DEFAULT_IDLE: this is a background sanity check, never urgent.
         this._pollId = GLib.timeout_add_seconds(

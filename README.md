@@ -15,13 +15,19 @@ Purely local — no downloads, no internet.
 - **Sync mode** — one image on every monitor.
 - **History** — Previous / Next for all monitors, or per monitor.
 - **Swap Images** — rotate the current images across monitors.
-- **Carousel** — an on-screen thumbnail strip per monitor: scroll, click to apply,
-  favorite or trash.
-- **Favorites & Trash** — copy the current image to a favorites folder, or send it to
-  the system trash and drop it from rotation.
-- **Monitor detection** — reacts to plug/unplug, re-checks periodically, and has a
-  manual *Refresh Monitors* action for port swaps the desktop doesn't announce.
-- Optional notifications; image count in the panel tooltip.
+- **Carousel** — an on-screen thumbnail strip per monitor, from the top or bottom
+  edge: scroll, click to apply, favorite or trash. Its controls sit in a tab on the
+  strip; collapse it to just the tab. Three thumbnail sizes; file names on hover,
+  always or never. It stays clear of panels, including auto-hiding ones.
+- **Favorites & Trash** — copy the current image to a favorites folder (or take it
+  out again), or send it to the system trash and drop it from rotation.
+- **Monitor detection** — reacts to plug/unplug, optionally re-checks on a timer, and
+  has a manual *Refresh Monitors* action for port swaps the desktop doesn't announce.
+- **Follows your theme** — the carousel takes its colours from the Cinnamon theme
+  and changes with it.
+- **Panel icon** — tooltip with the time to the next change and what's paused;
+  scroll for previous / next; middle-click to pause.
+- Optional change notifications.
 
 ## Requirements
 
@@ -48,7 +54,23 @@ Source: <https://github.com/inklikeurine/cinnamon-applets/tree/main/wallshift@in
 1. Add **Wallshift** to a panel (*Right-click panel → Applets*).
 2. Right-click the icon → **Configure…** and pick a wallpaper folder on the General
    tab. Each detected monitor gets its own tab for folder, scaling and enable.
-3. Left-click the icon for Next / Previous / Pause / Swap and the per-monitor menus.
+3. Left-click the icon for Next / Previous / Pause / Swap and the per-monitor menus
+   (with one monitor its items sit directly in the menu; in Sync mode there is one
+   *All monitors* submenu). Turn on *Carousel* there to browse thumbnails.
+4. Scroll on the icon to step through wallpapers; middle-click to pause or resume.
+
+Settings (*Configure…*, or the gear in *System Settings → Applets* — both open the
+same window):
+
+- **Folders** — the wallpaper folder (default for every monitor, and the pool in
+  Sync mode) and the favorites folder.
+- **Rotation** — interval, order, change notifications.
+- **Carousel** — which edge it comes in from, thumbnail size, file names, and
+  whether it closes after you pick an image.
+- **Monitors** — Sync mode, the periodic re-check (on/off and interval) and
+  *Refresh Monitors*.
+- **One tab per monitor** — enable, scaling, and a folder of its own (the clear
+  button goes back to the default folder).
 
 ## Supported formats
 
@@ -69,7 +91,14 @@ Folders are scanned recursively; hidden files are skipped.
 - Minimum interval is 10 seconds to avoid back-to-back ImageMagick runs. New images
   in a folder are picked up on the next rescan (startup or a settings change), not
   immediately.
-- Trash uses `gio trash`, never `rm`; Favorites copies the file.
+- Trash uses `gio trash`, never `rm`; Favorites copies the file. Removing a favorite
+  sends the copy in the favorites folder to the system trash; an image that lives
+  in the favorites folder itself is never removed that way.
+- The carousel hides while a fullscreen window covers its monitor. On a portrait
+  monitor it runs down the left (*Top edge*) or right (*Bottom edge*) side.
+- Carousel colours are read from the theme's menu style. A theme that leaves menus
+  transparent gets a neutral dark strip instead.
+- Translations: strings are ready for translation (`po/`); none ship yet.
 - Settings open in Wallshift's own window (`configure.py`) from both the applet's
   right-click *Configure…* and *System Settings → Applets*. `metadata.json` names it
   in `external-configuration-app` so there is only ever one settings window.

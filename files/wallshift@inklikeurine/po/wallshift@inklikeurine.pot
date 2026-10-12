@@ -1,0 +1,398 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the wallshift@inklikeurine package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: wallshift@inklikeurine 0.1.0\n"
+"Report-Msgid-Bugs-To: https://github.com/inklikeurine/cinnamon-applets/"
+"issues\n"
+"POT-Creation-Date: 2026-10-12 22:01+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
+
+#: applet.js:67 applet.js:716 applet.js:724 applet.js:734 applet.js:755
+#: modules/Utils.js:175
+msgid "Wallshift"
+msgstr ""
+
+#: applet.js:634
+msgid "Wallpaper changed"
+msgstr ""
+
+#: applet.js:716
+#, javascript-format
+msgid "Saved to Favorites: %s"
+msgstr ""
+
+#: applet.js:724
+#, javascript-format
+msgid "%s is in your Favorites folder"
+msgstr ""
+
+#: applet.js:734
+#, javascript-format
+msgid "Removed from Favorites: %s"
+msgstr ""
+
+#: applet.js:755
+#, javascript-format
+msgid "Moved to Trash: %s"
+msgstr ""
+
+#: applet.js:903
+msgid "Next Wallpaper"
+msgstr ""
+
+#: applet.js:906
+msgid "Previous Wallpaper"
+msgstr ""
+
+#: applet.js:912 applet.js:1043
+msgid "Pause Rotation"
+msgstr ""
+
+#: applet.js:916
+msgid "Swap Images"
+msgstr ""
+
+#: applet.js:929
+msgid "Refresh Monitors"
+msgstr ""
+
+#: applet.js:933
+msgid "Open Image Folder"
+msgstr ""
+
+#: applet.js:950
+msgid "(none)"
+msgstr ""
+
+#: applet.js:977
+msgid "(no monitors detected)"
+msgstr ""
+
+#: applet.js:982 applet.js:1002
+msgid "Carousel"
+msgstr ""
+
+#: applet.js:988
+msgid "All monitors"
+msgstr ""
+
+#: applet.js:990
+#, javascript-format
+msgid "Carousel (on %s)"
+msgstr ""
+
+#: applet.js:1000 modules/Utils.js:177
+msgid "paused"
+msgstr ""
+
+#: applet.js:1035
+msgid "Next Image"
+msgstr ""
+
+#: applet.js:1039
+msgid "Previous Image"
+msgstr ""
+
+#: applet.js:1054 modules/CarouselManager.js:262
+msgid "Remove from Favorites"
+msgstr ""
+
+#: applet.js:1054
+msgid "Favorite This Image"
+msgstr ""
+
+#: applet.js:1059
+msgid "Trash This Image"
+msgstr ""
+
+#: applet.js:1064
+msgid "Open in Image Viewer"
+msgstr ""
+
+#: modules/CarouselManager.js:262 modules/CarouselManager.js:351
+msgid "Add to Favorites"
+msgstr ""
+
+#: modules/CarouselManager.js:349 modules/CarouselManager.js:404
+msgid "Hide thumbnails"
+msgstr ""
+
+#: modules/CarouselManager.js:358
+msgid "Move to Trash"
+msgstr ""
+
+#: modules/CarouselManager.js:360
+msgid "Close carousel"
+msgstr ""
+
+#: modules/CarouselManager.js:404
+msgid "Show thumbnails"
+msgstr ""
+
+#: modules/CarouselManager.js:485
+#, javascript-format
+msgid "No images in %s — right-click Wallshift → Configure"
+msgstr ""
+
+#: modules/CarouselManager.js:486
+msgid "No images — right-click Wallshift → Configure"
+msgstr ""
+
+#: modules/Utils.js:162
+#, javascript-format
+msgid "%d s"
+msgid_plural "%d s"
+msgstr[0] ""
+msgstr[1] ""
+
+#: modules/Utils.js:164 modules/Utils.js:167
+#, javascript-format
+msgid "%d min"
+msgid_plural "%d min"
+msgstr[0] ""
+msgstr[1] ""
+
+#: modules/Utils.js:166
+#, javascript-format
+msgid "%d h"
+msgid_plural "%d h"
+msgstr[0] ""
+msgstr[1] ""
+
+#: modules/Utils.js:174
+msgid "Wallshift — No images found. Right-click → Configure."
+msgstr ""
+
+#: modules/Utils.js:179
+#, javascript-format
+msgid "next change in %s"
+msgstr ""
+
+#: modules/Utils.js:180
+#, javascript-format
+msgid "%d image"
+msgid_plural "%d images"
+msgstr[0] ""
+msgstr[1] ""
+
+#: modules/Utils.js:183
+#, javascript-format
+msgid "%s paused"
+msgstr ""
+
+#: modules/Utils.js:204
+#, javascript-format
+msgid "%s (all monitors)"
+msgstr ""
+
+#: configure.py:392
+msgid "Decrease"
+msgstr ""
+
+#: configure.py:399
+msgid "Increase"
+msgstr ""
+
+#: configure.py:467
+msgid "Wallshift Settings"
+msgstr ""
+
+#: configure.py:486
+msgid "General"
+msgstr ""
+
+#: configure.py:512 configure.py:643
+msgid "Select wallpaper folder"
+msgstr ""
+
+#: configure.py:515
+msgid "Select favorites folder"
+msgstr ""
+
+#: configure.py:518
+msgid "Folders"
+msgstr ""
+
+#: configure.py:519 configure.py:653
+msgid "Wallpaper folder"
+msgstr ""
+
+#: configure.py:520
+msgid "Favorites folder"
+msgstr ""
+
+#: configure.py:530 configure.py:585
+msgid "min"
+msgstr ""
+
+#: configure.py:532
+msgid "s"
+msgstr ""
+
+#: configure.py:534
+msgid "Change every"
+msgstr ""
+
+#: configure.py:535
+msgid "The minimum is 10 seconds, so Wallshift will use 10 s."
+msgstr ""
+
+#: configure.py:538
+msgid "Random (no repeats)"
+msgstr ""
+
+#: configure.py:539
+msgid "Random (may repeat)"
+msgstr ""
+
+#: configure.py:540
+msgid "Sequential (A–Z)"
+msgstr ""
+
+#: configure.py:544
+msgid "Rotation"
+msgstr ""
+
+#: configure.py:546
+msgid "Order"
+msgstr ""
+
+#: configure.py:547
+msgid "Notify when the wallpaper changes"
+msgstr ""
+
+#: configure.py:552
+msgid "Bottom edge"
+msgstr ""
+
+#: configure.py:553
+msgid "Top edge"
+msgstr ""
+
+#: configure.py:555
+msgid "Comes in from the"
+msgstr ""
+
+#: configure.py:556
+msgid ""
+"Top edge or bottom edge; left (top) or right (bottom) on a portrait monitor. "
+"It always stays clear of panels, including ones that hide themselves."
+msgstr ""
+
+#: configure.py:559
+msgid "Small"
+msgstr ""
+
+#: configure.py:560
+msgid "Medium"
+msgstr ""
+
+#: configure.py:561
+msgid "Large"
+msgstr ""
+
+#: configure.py:564
+msgid "On hover"
+msgstr ""
+
+#: configure.py:565
+msgid "Always"
+msgstr ""
+
+#: configure.py:566
+msgid "Never"
+msgstr ""
+
+#: configure.py:572
+msgid "Thumbnail size"
+msgstr ""
+
+#: configure.py:573
+msgid "Show file names"
+msgstr ""
+
+#: configure.py:574
+msgid "Close after choosing an image"
+msgstr ""
+
+#: configure.py:586
+msgid "Every"
+msgstr ""
+
+#: configure.py:590
+msgid "Re-check for monitor changes"
+msgstr ""
+
+#: configure.py:591
+msgid ""
+"When off, Wallshift still reacts when Cinnamon reports a monitor change; "
+"only the timed re-check stops."
+msgstr ""
+
+#: configure.py:598
+msgid "Monitors"
+msgstr ""
+
+#: configure.py:599
+msgid "Same image on all monitors"
+msgstr ""
+
+#: configure.py:602
+msgid "Apply a port or monitor change now"
+msgstr ""
+
+#: configure.py:633
+msgid "Zoom"
+msgstr ""
+
+#: configure.py:634
+msgid "Fit"
+msgstr ""
+
+#: configure.py:635
+msgid "Stretch"
+msgstr ""
+
+#: configure.py:636
+msgid "Center"
+msgstr ""
+
+#: configure.py:637
+msgid "Tile"
+msgstr ""
+
+#: configure.py:648
+msgid "Use the default folder"
+msgstr ""
+
+#: configure.py:662
+msgid "Uses the default folder"
+msgstr ""
+
+#: configure.py:681
+msgid "Enabled"
+msgstr ""
+
+#: configure.py:682
+msgid "Scaling"
+msgstr ""
+
+#: configure.py:703
+msgid "Sync mode uses the default folder on every monitor."
+msgstr ""
+
+#: configure.py:765
+msgid "Refreshed ✓"
+msgstr ""
