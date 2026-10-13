@@ -2,7 +2,7 @@
   "uuid": "wallshift@inklikeurine",
   "name": "Wallshift",
   "description": "Rotates wallpapers from local folders with multi-monitor support",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "cinnamon-version": [
     "6.6"
   ],

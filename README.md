@@ -35,8 +35,8 @@ Purely local — no downloads, no internet.
 - **ImageMagick** (`convert`) for multi-monitor compositing and carousel thumbnails:
   `sudo apt install imagemagick`. Single-monitor use works without it; with two or
   more monitors and no ImageMagick, only the first monitor's image is applied.
-- Python 3 with GTK 3 (PyGObject) and `python3-dbus` for the settings dialog —
-  present on Linux Mint. XApp is used for the native Mint look when available.
+- The settings window uses Cinnamon's own settings modules (part of `cinnamon`)
+  and `python3-xapp`, both installed with Cinnamon on Linux Mint.
 
 ## Install
 
@@ -70,7 +70,11 @@ same window):
 - **Monitors** — Sync mode, the periodic re-check (on/off and interval) and
   *Refresh Monitors*.
 - **One tab per monitor** — enable, scaling, and a folder of its own (the clear
-  button goes back to the default folder).
+  button goes back to the default folder). Tabs come and go while the window is
+  open as monitors are plugged in or unplugged.
+
+The window looks like every other applet's settings, ☰ menu included (import,
+export, reset to defaults, reload the applet).
 
 ## Supported formats
 
@@ -101,7 +105,11 @@ Folders are scanned recursively; hidden files are skipped.
 - Translations: strings are ready for translation (`po/`); none ship yet.
 - Settings open in Wallshift's own window (`configure.py`) from both the applet's
   right-click *Configure…* and *System Settings → Applets*. `metadata.json` names it
-  in `external-configuration-app` so there is only ever one settings window.
+  in `external-configuration-app` so there is only ever one settings window. It is
+  built from Cinnamon's own settings widgets; it is a separate window only because
+  Cinnamon's generated settings cannot add a tab per connected monitor.
+- *Reset to defaults* in the ☰ menu resets the General settings, as in Cinnamon's
+  own settings window; per-monitor choices are kept.
 
 ## AI-generated
 

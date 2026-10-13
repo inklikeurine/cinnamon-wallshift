@@ -3,6 +3,24 @@
 All notable changes to Wallshift are recorded here.
 Versions follow `metadata.json` (`version`).
 
+## [0.2.0] — 2026-10-12
+
+### Changed
+- The settings window looks like every other applet's settings: it is built
+  from Cinnamon's own settings widgets (framed sections, rows, switches, spin
+  buttons and file choosers), with the page switcher in the toolbar and the ☰
+  menu (import, export, reset to defaults, reload). Number fields are
+  Cinnamon's spin buttons (the number, then − and +). The General page is
+  generated from `settings-schema.json`; longer explanations moved into
+  tooltips. Window title "Wallshift".
+- Monitor tabs follow the screen: plugging in or unplugging a monitor adds or
+  removes its tab while the window is open.
+- The applet is highlighted on the panel while its settings window is open,
+  as with Cinnamon's own settings window.
+
+### Removed
+- `python3-dbus` is no longer needed (the window talks to Cinnamon through Gio).
+
 ## [0.1.0] — 2026-10-12
 
 UI polish: a reworked carousel, a tidier panel menu and settings window, and the

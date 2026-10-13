@@ -59,7 +59,8 @@
     "max": 1440,
     "step": 1,
     "units": "minutes",
-    "description": "Change wallpaper every (minutes; 0 = use seconds only)"
+    "description": "Change every",
+    "tooltip": "Minutes and seconds between wallpaper changes; the minimum is 10 seconds"
   },
   "interval-seconds": {
     "type": "spinbutton",
@@ -68,7 +69,7 @@
     "max": 59,
     "step": 1,
     "units": "seconds",
-    "description": "Additional seconds"
+    "description": "Change every (seconds)"
   },
   "detection-interval-minutes": {
     "type": "spinbutton",
@@ -77,7 +78,7 @@
     "max": 1440,
     "step": 1,
     "units": "minutes",
-    "description": "Re-check for monitor / port changes every (minutes)",
+    "description": "Every",
     "dependency": "detection-poll-enabled"
   },
   "image-order": {
@@ -88,34 +89,38 @@
       "Random (may repeat)": "random",
       "Sequential (A\u2013Z)": "sequential"
     },
-    "description": "Image rotation order"
+    "description": "Order"
   },
   "show-notifications": {
     "type": "switch",
     "default": false,
-    "description": "Show notification when wallpaper changes"
+    "description": "Notify when the wallpaper changes"
   },
   "global-folder": {
     "type": "filechooser",
     "default": "",
     "select-dir": true,
-    "description": "Default wallpaper folder \u2014 fallback for any monitor without its own folder, and the shared pool in Sync Mode"
+    "description": "Wallpaper folder",
+    "tooltip": "The default folder: used by every monitor without a folder of its own, and by Sync mode"
   },
   "favorites-folder": {
     "type": "filechooser",
     "default": "",
     "select-dir": true,
-    "description": "Folder to save favorited wallpapers (default: ~/Pictures/Wallpaper Favorites)"
+    "description": "Favorites folder",
+    "tooltip": "Starred wallpapers are copied here (default: ~/Pictures/Wallpaper Favorites)"
   },
   "sync-mode": {
     "type": "switch",
     "default": false,
-    "description": "Same image on all monitors (uses the default wallpaper folder above)"
+    "description": "Same image on all monitors",
+    "tooltip": "Uses the wallpaper folder above on every monitor"
   },
   "detection-poll-enabled": {
     "type": "switch",
     "default": true,
-    "description": "Re-check for monitor changes on a timer"
+    "description": "Re-check for monitor changes",
+    "tooltip": "When off, Wallshift still reacts when Cinnamon reports a monitor change; only the timed re-check stops."
   },
   "carousel-edge": {
     "type": "combobox",
@@ -124,7 +129,8 @@
       "Bottom edge": "bottom",
       "Top edge": "top"
     },
-    "description": "Carousel comes in from the (left or right on a portrait monitor)"
+    "description": "Comes in from the",
+    "tooltip": "Top edge or bottom edge; left (top) or right (bottom) on a portrait monitor. It always stays clear of panels, including ones that hide themselves."
   },
   "carousel-thumb-size": {
     "type": "combobox",
@@ -144,11 +150,11 @@
       "Always": "always",
       "Never": "never"
     },
-    "description": "Show file names on thumbnails"
+    "description": "Show file names"
   },
   "carousel-close-on-pick": {
     "type": "switch",
     "default": false,
-    "description": "Close the carousel after choosing an image"
+    "description": "Close after choosing an image"
   }
 }
