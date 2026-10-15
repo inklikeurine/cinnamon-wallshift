@@ -127,7 +127,7 @@ var absoluteDirOr = function(path, fallback, what) {
 
 // Rotation interval in seconds from the two interval settings. 0 minutes is a
 // real value ("use seconds only"), so only a missing setting falls back to the
-// 5-minute default. Never below 10 s, to avoid back-to-back ImageMagick runs.
+// 5-minute default. Never below 10 s, to avoid back-to-back compositing runs.
 var MIN_INTERVAL_SECONDS = 10;
 var intervalSeconds = function(minutes, seconds) {
     let m = Number.isFinite(minutes) ? minutes : 5;

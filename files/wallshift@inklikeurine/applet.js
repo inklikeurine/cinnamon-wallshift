@@ -76,7 +76,6 @@ class WallshiftApplet extends Applet.IconApplet {
         this._historyPosition      = 0;
         this._imagePools           = new Map();  // monitorName → ImagePool
         this._syncPool             = null;
-        this._imagemagickAvailable = false;
         this._monitorsReady        = false;
         this._poolGen              = 0;      // Invalidates a superseded _setupImagePools()
 
@@ -104,15 +103,11 @@ class WallshiftApplet extends Applet.IconApplet {
         this._stateManager.load();
         this._updatePanelIcon();   // rotation may have been paused before a reload
 
-        this._compositor = new Compositor(this._cacheDir);
-
-        this._imagemagickAvailable = GLib.find_program_in_path('convert') !== null;
-        if (!this._imagemagickAvailable) {
-            Utils.warn('ImageMagick (convert) not found — multi-monitor compositing disabled');
-        }
+        let toolPath = metadata.path + '/imagetool.py';
+        this._compositor = new Compositor(this._cacheDir, toolPath);
 
         // ── Carousel ───────────────────────────────────────────────────────────
-        this._thumbnailCache  = new ThumbnailCache(this._stateDir);
+        this._thumbnailCache  = new ThumbnailCache(this._stateDir, toolPath);
         this._carouselManager = new CarouselManager(
             this._stateManager, this._thumbnailCache, this);
         this._carouselManager.setOptions(this._carouselOptions());
@@ -582,25 +577,9 @@ class WallshiftApplet extends Applet.IconApplet {
     _compose(monitors, assignments, isNewChange, monitorImages) {
         this._compositeInProgress = true;
 
-        // Only need ImageMagick when 2+ monitors actually have images to composite.
-        // Count active assignments, not total connected monitors — a disabled or
-        // image-less monitor doesn't require compositing.
-        let activeCount = monitors.filter(
-            m => assignments[m.name] && assignments[m.name].path).length;
-
-        if (activeCount > 1 && !this._imagemagickAvailable) {
-            Utils.warn('ImageMagick missing — applying first monitor image only');
-            let first = monitors.find(m => assignments[m.name] && assignments[m.name].path);
-            let asgn  = first ? assignments[first.name] : null;
-            if (asgn) this._applyWallpaper(asgn.path, 'zoom');
-            this._compositeInProgress = false;
-            this._checkPending();
-            return;
-        }
-
         this._compositor.compose(monitors, assignments, (err, outputPath, pictureOptions) => {
             this._compositeInProgress = false;
-            if (this._destroyed) return;   // removed from the panel while ImageMagick ran
+            if (this._destroyed) return;   // removed from the panel while compositing ran
 
             if (err) {
                 Utils.error('Compositor failed: ' + err.message);
@@ -1100,7 +1079,7 @@ class WallshiftApplet extends Applet.IconApplet {
     }
 
     // Scroll on the panel icon: up = previous, down = next. Ignored while a
-    // composite is being built, so a fast scroll cannot pile up ImageMagick runs.
+    // composite is being built, so a fast scroll cannot pile up compositing runs.
     _onPanelScroll(event) {
         if (this._compositeInProgress || !this._monitorsReady) return Clutter.EVENT_STOP;
         let dir = event.get_scroll_direction();
@@ -1126,7 +1105,7 @@ class WallshiftApplet extends Applet.IconApplet {
     // a destroy() method is never invoked. Everything created in the constructor
     // or later — timers, file monitor, monitors-changed signal, chrome actors,
     // settings bindings, the popup menu — is released here, and in-flight async
-    // work (ImageMagick, folder scans, thumbnails) is told to drop its results.
+    // work (compositing, folder scans, thumbnails) is told to drop its results.
     on_applet_removed_from_panel(deleteConfig) {
         this._destroyed = true;
         this._poolGen++;                 // any folder scan still running is superseded
@@ -1151,7 +1130,7 @@ class WallshiftApplet extends Applet.IconApplet {
             this._carouselManager.destroy();
             this._carouselManager = null;
         }
-        if (this._thumbnailCache) {      // queued convert jobs; in-flight results ignored
+        if (this._thumbnailCache) {      // queued thumbnail jobs; in-flight results ignored
             this._thumbnailCache.destroy();
             this._thumbnailCache = null;
         }

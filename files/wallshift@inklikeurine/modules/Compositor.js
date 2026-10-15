@@ -1,12 +1,9 @@
-// Compositor.js — Builds the multi-monitor composite wallpaper via ImageMagick.
+// Compositor.js — Builds the multi-monitor composite wallpaper via imagetool.py.
 //
-// For a single monitor, returns the source path directly (no ImageMagick).
-// For multiple monitors, assembles a canvas the size of the full virtual desktop,
-// places each monitor's image into its region at +x+y, and writes a JPEG that
+// With one monitor connected, returns the source path directly (no compositing).
+// With several, assembles a canvas the size of the full virtual desktop, places
+// each monitor's image into its region at +x+y, and writes a JPEG that
 // gsettings picture-options:'spanned' maps 1:1 to each physical display.
-
-const GLib = imports.gi.GLib;
-const Gio  = imports.gi.Gio;
 
 const Utils = require('./modules/Utils');   // relative to the applet dir, as in applet.js
 
@@ -22,8 +19,10 @@ const SCALING_TO_PICTURE_OPTIONS = {
 
 var Compositor = class Compositor {
 
-    constructor(cacheDir) {
+    // toolPath: absolute path of imagetool.py in the applet folder.
+    constructor(cacheDir, toolPath) {
         this._cacheDir    = cacheDir;
+        this._toolPath    = toolPath;
         this._slot        = 0;
         this._outputPaths = [
             cacheDir + '/current_wallpaper_0.jpg',
@@ -48,49 +47,49 @@ var Compositor = class Compositor {
             return;
         }
 
-        // ── Single monitor: skip ImageMagick entirely ─────────────────────────
-        if (active.length === 1) {
-            let mon = active[0];
-            let asgn = assignments[mon.name];
+        // ── Single monitor: hand Cinnamon the image itself ────────────────────
+        // Only when exactly one monitor is connected: Cinnamon draws a non-spanned
+        // wallpaper on every monitor, so with two connected and one image this
+        // would put that image on both.
+        if (monitors.length === 1) {
+            let asgn = assignments[active[0].name];
             let pictureOptions = SCALING_TO_PICTURE_OPTIONS[asgn.scaling] || 'zoom';
             callback(null, asgn.path, pictureOptions);
             return;
         }
 
-        // ── Multi-monitor: build ImageMagick composite ────────────────────────
+        // ── Multi-monitor: build the composite ────────────────────────────────
+        // Monitors without an image stay black.
         // Alternate between two output filenames so picture-uri changes on every
         // write — Cinnamon only redraws the background when the URI value changes.
         this._slot = 1 - this._slot;
         let outputPath = this._outputPaths[this._slot];
 
         let canvas = this._totalCanvasSize(monitors);
-        let tmpPath = this._cacheDir + '/compositing_' + Date.now() + '.jpg';
-        let argv = this._buildConvertCommand(active, assignments, canvas, tmpPath);
+        let job = {
+            width:    canvas.width,
+            height:   canvas.height,
+            output:   outputPath,
+            monitors: active.map(mon => ({
+                path:    assignments[mon.name].path,
+                x:       mon.x,
+                y:       mon.y,
+                width:   mon.width,
+                height:  mon.height,
+                scaling: this._scaling(assignments[mon.name].scaling)
+            }))
+        };
 
-        Utils.spawnAsync(argv, (err, stdout, stderr, exitCode) => {
-            if (err || exitCode !== 0) {
-                Utils.error('ImageMagick failed (exit ' + exitCode + '): ' + stderr);
-                // Clean up temp file if it exists
-                try {
-                    Gio.File.new_for_path(tmpPath).delete(null);
-                } catch(e2) { /* ignore */ }
-                callback(err || new Error('convert exited ' + exitCode), null, null);
-                return;
-            }
-
-            // Atomically replace the output file
-            try {
-                let tmpFile = Gio.File.new_for_path(tmpPath);
-                let outFile = Gio.File.new_for_path(outputPath);
-                tmpFile.move(outFile, Gio.FileCopyFlags.OVERWRITE, null, null);
-            } catch(e) {
-                Utils.error('Failed to move composite output: ' + e.message);
-                callback(e, null, null);
-                return;
-            }
-
-            callback(null, outputPath, 'spanned');
-        });
+        Utils.spawnAsync(['/usr/bin/python3', this._toolPath, 'compose', JSON.stringify(job)],
+            (err, stdout, stderr, exitCode) => {
+                if (err || exitCode !== 0) {
+                    Utils.error('Compositing failed (exit ' + exitCode + '): ' +
+                        ((stderr || '').trim() || (err && err.message)));
+                    callback(err || new Error('imagetool exited ' + exitCode), null, null);
+                    return;
+                }
+                callback(null, outputPath, 'spanned');
+            });
     }
 
     // ── Internal ───────────────────────────────────────────────────────────────
@@ -104,87 +103,9 @@ var Compositor = class Compositor {
         return {width: maxX, height: maxY};
     }
 
-    // Builds the `convert` argv for ImageMagick 6.x / 7.x (both use same CLI here).
-    //
-    // Strategy: start with a black canvas, then for each monitor, open the image
-    // in a parenthesised group, scale it, then composite it at the monitor's offset.
-    _buildConvertCommand(activeMonitors, assignments, canvas, outputPath) {
-        let argv = [
-            'convert',
-            '-size', canvas.width + 'x' + canvas.height,
-            'xc:black'
-        ];
-
-        for (let mon of activeMonitors) {
-            let asgn = assignments[mon.name];
-            // Scale the image in an isolated group
-            argv.push('(');
-            argv.push(...this._scalingArgs(asgn.path, mon.width, mon.height, asgn.scaling));
-            argv.push(')');
-            // ImageMagick 6: -gravity set inside () persists after the closing ).
-            // Reset to NorthWest so +X+Y is measured from the canvas top-left,
-            // not from the canvas centre (which would shift every monitor right).
-            argv.push('-gravity', 'NorthWest');
-            argv.push('-geometry', '+' + mon.x + '+' + mon.y);
-            argv.push('-composite');
-        }
-
-        // JPEG output: ~10× faster to write than PNG for large canvases, and
-        // Cinnamon decodes it faster too. Quality 95 is visually lossless for wallpaper.
-        argv.push('-quality', '95');
-        argv.push('-strip');    // drop metadata — smaller file, faster write
-        argv.push(outputPath);
-        return argv;
-    }
-
-    // Returns the ImageMagick sub-command arguments to scale `imagePath` to WxH
-    // using the named scaling mode. The output is suitable for insertion between
-    // `(` and `)` in a convert command.
-    _scalingArgs(imagePath, w, h, scalingMode) {
-        let size = w + 'x' + h;
-
-        switch (scalingMode) {
-            case 'zoom':
-                // Fill and crop — scale to fill WxH, centre, then crop to exact size.
-                // -thumbnail: fast sampling pre-pass before filtering (much faster than
-                // -resize for large sources; same quality for wallpaper use).
-                return [imagePath,
-                    '-thumbnail', size + '^',
-                    '-gravity', 'Center',
-                    '-extent', size];
-
-            case 'fit':
-                // Letterbox/pillarbox — scale to fit within WxH, pad with black
-                return [imagePath,
-                    '-thumbnail', size,
-                    '-background', 'black',
-                    '-gravity', 'Center',
-                    '-extent', size];
-
-            case 'stretch':
-                // Ignore aspect ratio — scale to exactly WxH
-                return [imagePath,
-                    '-thumbnail', size + '!'];
-
-            case 'center':
-                // No scaling — centre on black canvas; crop if image is larger
-                return [imagePath,
-                    '-gravity', 'Center',
-                    '-background', 'black',
-                    '-extent', size];
-
-            case 'tile':
-                // Tile the image to fill the area
-                return [
-                    '(', imagePath, ')',
-                    '-write', 'mpr:tile', '+delete',
-                    '-size', size,
-                    'tile:mpr:tile'
-                ];
-
-            default:
-                Utils.warn('Unknown scaling mode "' + scalingMode + '", falling back to zoom');
-                return this._scalingArgs(imagePath, w, h, 'zoom');
-        }
+    _scaling(mode) {
+        if (SCALING_TO_PICTURE_OPTIONS[mode]) return mode;
+        Utils.warn('Unknown scaling mode "' + mode + '", falling back to zoom');
+        return 'zoom';
     }
 };

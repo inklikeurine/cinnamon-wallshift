@@ -32,9 +32,9 @@ Purely local — no downloads, no internet.
 ## Requirements
 
 - Cinnamon 6.6+ on X11 (Linux Mint 22.3+). Wayland sessions are not supported.
-- **ImageMagick** (`convert`) for multi-monitor compositing and carousel thumbnails:
-  `sudo apt install imagemagick`. Single-monitor use works without it; with two or
-  more monitors and no ImageMagick, only the first monitor's image is applied.
+- Nothing else to install: multi-monitor compositing and carousel thumbnails use
+  GdkPixbuf (the image library Cinnamon loads wallpapers with) through Python,
+  both part of every Cinnamon install.
 - The settings window uses Cinnamon's own settings modules (part of `cinnamon`)
   and `python3-xapp`, both installed with Cinnamon on Linux Mint.
 
@@ -79,7 +79,7 @@ export, reset to defaults, reload the applet).
 
 ## Supported formats
 
-JPEG, PNG, WebP, BMP, GIF (first frame), AVIF (when your ImageMagick build supports it).
+JPEG, PNG, WebP, BMP, GIF (first frame), AVIF (when the AVIF image loader for GdkPixbuf is installed).
 Folders are scanned recursively; hidden files are skipped.
 
 ## Notes / caveats
@@ -90,10 +90,10 @@ Folders are scanned recursively; hidden files are skipped.
 - Network requests: none.
 - X11 only: the spanned-composite approach and the `org.cinnamon.desktop.background`
   path do not apply to Wayland.
-- Animated GIFs show their first frame only. AVIF depends on the local ImageMagick build.
+- Animated GIFs show their first frame only. AVIF needs the GdkPixbuf AVIF loader, which Cinnamon also needs to show AVIF wallpapers.
 - Per-monitor settings follow the connector name (`HDMI-1`, `DP-2`, …). Moving a
   cable to another port moves the monitor to that port's settings.
-- Minimum interval is 10 seconds to avoid back-to-back ImageMagick runs. New images
+- Minimum interval is 10 seconds to avoid back-to-back compositing runs. New images
   in a folder are picked up on the next rescan (startup or a settings change), not
   immediately.
 - Trash uses `gio trash`, never `rm`; Favorites copies the file. Removing a favorite
