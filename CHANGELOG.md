@@ -3,6 +3,20 @@
 All notable changes to Wallshift are recorded here.
 Versions follow `metadata.json` (`version`).
 
+## [0.2.2] — 2026-10-15
+
+### Changed
+- New icon: an orange tile in System Settings → Applets that shows on light
+  and dark themes, and a matching Wallshift symbol on the panel (a picture
+  frame that is also a repeat arrow). When rotation is paused the symbol
+  keeps its shape and gains a pause mark, instead of turning into a plain
+  pause symbol. Change notifications use the new symbol too.
+
+### Fixed
+- The panel icon was drawn smaller than the other panel icons: it was set
+  before Cinnamon had placed the applet on the panel, so it never got the
+  panel's icon size. It now matches its neighbours.
+
 ## [0.2.1] — 2026-10-15
 
 ### Fixed
