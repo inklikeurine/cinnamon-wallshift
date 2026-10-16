@@ -147,7 +147,7 @@ var MonitorManager = class MonitorManager {
     // A stable string describing the current topology: connector, EDID name,
     // geometry and primary flag of every monitor. Recomposing is only worth
     // doing when this changes, which keeps both the signal- and poll-driven
-    // paths free of redundant ImageMagick work.
+    // paths free of redundant compositing work.
     _topologySignature() {
         return this._monitors.map(m =>
             m.name + ':' + m.displayName + ':' +

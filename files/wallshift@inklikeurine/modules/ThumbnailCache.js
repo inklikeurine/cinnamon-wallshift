@@ -4,7 +4,7 @@
 // Cache key: MD5 of the absolute image path + size suffix + '.jpg'
 //   250×140 (landscape, medium): _l250    140×250 (portrait, medium): _p250
 //   any other size W×H:          _WxH     (the carousel's small / large sizes)
-// Max concurrent ImageMagick jobs: 4 (queues excess requests, never drops them)
+// Max concurrent imagetool.py jobs: 4 (queues excess requests, never drops them)
 
 const GLib = imports.gi.GLib;
 const Gio  = imports.gi.Gio;
@@ -22,8 +22,10 @@ function sizeSuffix(w, h) {
 
 var ThumbnailCache = class ThumbnailCache {
 
-    constructor(stateDir) {
+    // toolPath: absolute path of imagetool.py in the applet folder.
+    constructor(stateDir, toolPath) {
         this._cacheDir   = stateDir + '/thumbnails';
+        this._toolPath   = toolPath;
         this._activeJobs = 0;
         this._queue      = [];       // pending { imagePath, isPortrait, cachePath, callbacks[] }
         this._inFlight   = new Map(); // imagePath → callbacks[] (jobs currently running)
@@ -32,7 +34,7 @@ var ThumbnailCache = class ThumbnailCache {
     }
 
     // Drop every queued job and ignore the results of the ones already running.
-    // Called when the applet leaves the panel: a convert process that is mid-way
+    // Called when the applet leaves the panel: an imagetool.py process that is mid-way
     // finishes on its own and its file stays in the cache for next time, but no
     // callback into a torn-down carousel is made.
     destroy() {
@@ -52,7 +54,7 @@ var ThumbnailCache = class ThumbnailCache {
     // Ensures a thumbnail exists for the given image.
     //
     // If the cache file is already on disk, fires callback(null, cachePath) immediately.
-    // Otherwise generates it via ImageMagick (async). If a job for this path is already
+    // Otherwise generates it via imagetool.py (async). If a job for this path is already
     // in flight, the callback is queued on that job rather than spawning a duplicate.
     //
     // callback: function(err, cachePath)
@@ -87,7 +89,7 @@ var ThumbnailCache = class ThumbnailCache {
     }
 
     // Returns false if the cache file is missing, empty, or unreadable.
-    // An empty file means a previous ImageMagick run failed mid-write.
+    // An empty file is left by older versions whose thumbnail run failed mid-write.
     _cacheFileValid(cachePath) {
         try {
             let info = Gio.File.new_for_path(cachePath)
@@ -99,16 +101,9 @@ var ThumbnailCache = class ThumbnailCache {
     }
 
     _runJob(job) {
-        let size = job.w + 'x' + job.h;
-
         Utils.spawnAsync([
-            'convert', job.imagePath,
-            '-thumbnail', size + '^',
-            '-gravity', 'Center',
-            '-extent', size,
-            '-quality', '85',
-            '-strip',
-            job.cachePath
+            '/usr/bin/python3', this._toolPath, 'thumb',
+            job.imagePath, String(job.w), String(job.h), job.cachePath
         ], (err, _stdout, stderr, exitCode) => {
             this._activeJobs--;
             if (this._destroyed) return;
@@ -117,7 +112,7 @@ var ThumbnailCache = class ThumbnailCache {
 
             if (err || exitCode !== 0) {
                 Utils.warn('Thumbnail failed for ' + job.imagePath +
-                    ': ' + (stderr || (err && err.message) || 'exit ' + exitCode));
+                    ': ' + ((stderr || '').trim() || (err && err.message) || 'exit ' + exitCode));
                 for (let cb of callbacks) cb(new Error('thumbnail generation failed'), null);
             } else {
                 for (let cb of callbacks) cb(null, job.cachePath);

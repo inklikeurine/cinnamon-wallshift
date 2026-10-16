@@ -3,6 +3,20 @@
 All notable changes to Wallshift are recorded here.
 Versions follow `metadata.json` (`version`).
 
+## [0.2.1] — 2026-10-15
+
+### Fixed
+- With sync off, every monitor showed the same image when ImageMagick was not
+  installed. Compositing no longer needs ImageMagick (see below).
+- With two or more monitors connected but only one of them having an image
+  (a monitor switched off in Wallshift, or an empty folder), that image was
+  shown on every monitor. The other monitors are now left black.
+
+### Changed
+- ImageMagick is no longer needed. The multi-monitor wallpaper and the
+  carousel thumbnails are built by `imagetool.py` with GdkPixbuf, which comes
+  with Cinnamon. It runs as a separate process, as ImageMagick did.
+
 ## [0.2.0] — 2026-10-12
 
 ### Changed
