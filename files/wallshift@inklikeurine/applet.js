@@ -12,6 +12,7 @@ const MessageTray = imports.ui.messageTray;
 const GLib      = imports.gi.GLib;
 const Gio       = imports.gi.Gio;
 const St        = imports.gi.St;
+const Gtk       = imports.gi.Gtk;
 const Clutter   = imports.gi.Clutter;
 const Pango     = imports.gi.Pango;
 
@@ -35,8 +36,10 @@ const absoluteDirOr = Utils.absoluteDirOr;
 // Strings go through the applet's own gettext domain (Utils._).
 const _ = Utils._;
 
-const ICON_NORMAL = 'preferences-desktop-wallpaper-symbolic';
-const ICON_PAUSED = 'media-playback-pause-symbolic';
+// Our own panel glyphs, in icons/ (added to the icon theme's search path in the
+// constructor so they recolour like any symbolic icon).
+const ICON_NORMAL = 'wallshift-symbolic';
+const ICON_PAUSED = 'wallshift-paused-symbolic';
 
 // Symbolic icons for the menu rows (all present in Adwaita, Mint-Y's fallback).
 const ICONS = {
@@ -63,6 +66,9 @@ class WallshiftApplet extends Applet.IconApplet {
         this._instanceId  = instanceId;
 
         // ── Panel appearance (icon follows the pause state once state is loaded) ─
+        const iconDir = metadata.path + '/icons';
+        const theme = Gtk.IconTheme.get_default();
+        if (theme && !theme.get_search_path().includes(iconDir)) theme.append_search_path(iconDir);
         this.set_applet_icon_symbolic_name(ICON_NORMAL);
         this.set_applet_tooltip(_('Wallshift'));
 
@@ -1058,6 +1064,13 @@ class WallshiftApplet extends Applet.IconApplet {
     _updatePanelIcon() {
         this.set_applet_icon_symbolic_name(
             this._stateManager.isPaused() ? ICON_PAUSED : ICON_NORMAL);
+    }
+
+    // The constructor runs before Cinnamon attaches the applet to its panel, so
+    // the icon set there gets no size (it falls back to a small default). Set
+    // it again now that the panel's icon size is known.
+    on_applet_added_to_panel() {
+        this._updatePanelIcon();
     }
 
     // Rebuilt on every pointer entry, so "next change in …" is current without a timer.

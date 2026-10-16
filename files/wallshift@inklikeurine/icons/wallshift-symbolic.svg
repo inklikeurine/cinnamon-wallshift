@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <defs><clipPath id="gap"><path d="M0 0H10V6H16V16H0Z"/></clipPath></defs>
+  <g fill="#bebebe">
+  <path clip-path="url(#gap)" fill-rule="evenodd" d="M3.5 2H12.5A2.5 2.5 0 0 1 15 4.5V11.5A2.5 2.5 0 0 1 12.5 14H3.5A2.5 2.5 0 0 1 1 11.5V4.5A2.5 2.5 0 0 1 3.5 2ZM3.5 3H12.5A1.5 1.5 0 0 1 14 4.5V11.5A1.5 1.5 0 0 1 12.5 13H3.5A1.5 1.5 0 0 1 2 11.5V4.5A1.5 1.5 0 0 1 3.5 3Z"/>
+  <path d="M10 0L13.5 2.5L10 5Z"/>
+  <path d="M2.5 13L6 8.5L8.5 11L10 9.5L13.5 13Z"/>
+  <circle cx="11" cy="7" r="1.25"/>
+  </g>
+</svg>
