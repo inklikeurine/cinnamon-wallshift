@@ -24,7 +24,7 @@ import sys
 
 import gi
 gi.require_version('GdkPixbuf', '2.0')
-from gi.repository import GdkPixbuf
+from gi.repository import GdkPixbuf, GLib
 
 
 def _image_size(path):
@@ -78,7 +78,14 @@ def _draw(canvas, path, rx, ry, rw, rh, scaling):
         sw, sh = max(1, round(iw * s)), max(1, round(ih * s))
     # Loading straight at the target size lets the JPEG decoder skip detail it
     # would throw away — much faster than decoding in full and then scaling.
-    img = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, sw, sh, False)
+    try:
+        img = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, sw, sh, False)
+    except GLib.Error:
+        # GdkPixbuf 2.42 refuses a scaled load of an animated GIF over 64 KiB
+        # ("Not all frames of the GIF image were loaded"); a plain load still
+        # gives the first frame.
+        img = GdkPixbuf.Pixbuf.new_from_file(path).scale_simple(
+            sw, sh, GdkPixbuf.InterpType.BILINEAR)
     _place(canvas, img, rx, ry, rw, rh, (rw - sw) // 2, (rh - sh) // 2)
 
 
