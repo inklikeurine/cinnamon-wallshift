@@ -24,10 +24,14 @@ const Pango     = imports.gi.Pango;
 const Utils           = require('./modules/Utils');
 const StateManager    = require('./modules/StateManager').StateManager;
 const MonitorManager  = require('./modules/MonitorManager').MonitorManager;
-const ImagePool       = require('./modules/ImagePool').ImagePool;
+const ImagePoolModule = require('./modules/ImagePool');
+const ImagePool       = ImagePoolModule.ImagePool;
 const Compositor      = require('./modules/Compositor').Compositor;
 const CarouselManager = require('./modules/CarouselManager').CarouselManager;
 const ThumbnailCache  = require('./modules/ThumbnailCache').ThumbnailCache;
+const Actions         = require('./modules/Actions');
+const Rotation        = require('./modules/Rotation');
+const MonitorConfig   = require('./modules/MonitorConfig');
 
 // normalizePath / absoluteDirOr live in Utils.js (testable outside Cinnamon).
 const normalizePath = Utils.normalizePath;
@@ -41,20 +45,11 @@ const _ = Utils._;
 const ICON_NORMAL = 'wallshift-symbolic';
 const ICON_PAUSED = 'wallshift-paused-symbolic';
 
-// Symbolic icons for the menu rows (all present in Adwaita, Mint-Y's fallback).
+// Symbolic icons for the menu rows that are not commands (all present in Adwaita,
+// Mint-Y's fallback). Command rows take theirs from modules/Actions.js.
 const ICONS = {
-    next:     'go-next-symbolic',
-    previous: 'go-previous-symbolic',
-    pause:    'media-playback-pause-symbolic',
-    swap:     'object-flip-horizontal-symbolic',
     monitor:  'video-display-symbolic',
-    carousel: 'view-grid-symbolic',
-    favorite: 'non-starred-symbolic',
     starred:  'starred-symbolic',
-    trash:    'user-trash-symbolic',
-    viewer:   'image-x-generic-symbolic',
-    refresh:  'view-refresh-symbolic',
-    folder:   'folder-open-symbolic',
 };
 
 class WallshiftApplet extends Applet.IconApplet {
@@ -193,36 +188,32 @@ class WallshiftApplet extends Applet.IconApplet {
 
     // Opens configure.py — the single settings window for this applet.
     configureApplet() {
-        GLib.spawn_command_line_async(
-            '/usr/bin/python3 ' + this._metadata.path + '/configure.py ' +
-            this._metadata.uuid + ' ' + this._instanceId
-        );
+        Utils.launch(['/usr/bin/python3', this._metadata.path + '/configure.py',
+                      this._metadata.uuid, String(this._instanceId)]);
     }
 
-    // Returns the config for a given monitor.
-    // Enabled/Scaling come from monitor-config.json (written by configure.py).
-    // Per-monitor folder overrides are deferred (F12).
+    // One monitor's effective settings: Enabled / Scaling / Folder from
+    // monitor-config.json (written by configure.py); no folder of its own → the
+    // global folder.
     _getSlotConfig(monitorName) {
-        let override = (this._monitorConfig.monitors || {})[monitorName] || {};
-        let folder = override.folder || this._globalFolder || '';
+        let own = MonitorConfig.monitorOverrides(this._monitorConfig, monitorName);
         return {
-            enabled: override.enabled !== false,
-            scaling: override.scaling || 'zoom',
-            folder:  normalizePath(folder)
+            enabled: own.enabled,
+            scaling: own.scaling,
+            folder:  own.folder || normalizePath(this._globalFolder || ''),
         };
     }
 
     // ── monitor-config.json ────────────────────────────────────────────────────
 
+    // Any unreadable or malformed file gives the empty config (MonitorConfig.parse).
     _loadMonitorConfig() {
+        let text = '';
         try {
             let [ok, contents] = GLib.file_get_contents(this._monitorConfigPath);
-            if (ok && contents) {
-                this._monitorConfig = JSON.parse(Utils.bytesToString(contents));
-            }
-        } catch(e) {
-            this._monitorConfig = { monitors: {} };
-        }
+            if (ok && contents) text = Utils.bytesToString(contents);
+        } catch(e) { /* missing file */ }
+        this._monitorConfig = MonitorConfig.parse(text);
     }
 
     _watchMonitorConfig() {
@@ -343,8 +334,10 @@ class WallshiftApplet extends Applet.IconApplet {
         };
 
         if (pending === 0) { finish(); return; }
+        // Monitors that share a folder share one `find` run.
+        let scanFolder = ImagePoolModule.sharedScanner();
         for (let pool of pools) {
-            pool.scan(() => { if (--pending === 0) finish(); });
+            pool.scan(() => { if (--pending === 0) finish(); }, scanFolder);
         }
     }
 
@@ -384,54 +377,26 @@ class WallshiftApplet extends Applet.IconApplet {
         if (!this._stateManager.isPaused()) this._startTimer();
     }
 
-    // ── Assignment builders ────────────────────────────────────────────────────
+    // ── Rotation decisions (modules/Rotation.js) ───────────────────────────────
     //
-    // An "assignment" is { path, scaling } keyed by monitor name — the input the
-    // Compositor consumes. These helpers centralize the per-monitor scaling lookup
-    // and the saved-record access that the wallpaper pipeline below relies on.
+    // Which image goes where is decided in Rotation.js from this view of the
+    // applet's state; the methods below act on the answer (compose, apply, save).
 
-    // One assignment for a known image path, with the monitor's configured scaling.
-    _assignment(monName, path) {
-        return { path, scaling: this._getSlotConfig(monName).scaling };
+    _rotationView() {
+        return {
+            slot:     name => this._getSlotConfig(name),
+            current:  name => {
+                let rec = this._stateManager.getMonitorRecord(name);
+                return rec ? rec.currentImage : null;
+            },
+            isPaused: name => this._stateManager.isMonitorPaused(name),
+            exists:   path => Utils.fileExists(path),
+        };
     }
 
-    // Assignments restored from each monitor's last-saved image (skipping any whose
-    // file no longer exists). Used to redraw without advancing the rotation.
+    // Each monitor's saved image (files that are gone are skipped).
     _restoreAssignments(monitors) {
-        let assignments = {};
-        for (let mon of monitors) {
-            let rec = this._stateManager.getMonitorRecord(mon.name);
-            if (rec && rec.currentImage && Utils.fileExists(rec.currentImage)) {
-                assignments[mon.name] = this._assignment(mon.name, rec.currentImage);
-            }
-        }
-        return assignments;
-    }
-
-    // Assignments drawn from a history snapshot's monitor→path map.
-    _historyAssignments(entry, monitors) {
-        let assignments = {};
-        for (let mon of monitors) {
-            let path = entry.monitors[mon.name];
-            if (path && Utils.fileExists(path)) {
-                assignments[mon.name] = this._assignment(mon.name, path);
-            }
-        }
-        return assignments;
-    }
-
-    // Fill in any monitor missing from `assignments` with its saved current image,
-    // so the composite includes paused/disabled/unchanged monitors. When a
-    // `monitorImages` map is passed, carried-forward paths are recorded there too.
-    _carryForwardCurrent(assignments, monitors, monitorImages) {
-        for (let mon of monitors) {
-            if (assignments[mon.name]) continue;
-            let rec = this._stateManager.getMonitorRecord(mon.name);
-            if (rec && rec.currentImage) {
-                assignments[mon.name] = this._assignment(mon.name, rec.currentImage);
-                if (monitorImages) monitorImages[mon.name] = rec.currentImage;
-            }
-        }
+        return Rotation.restore(this._rotationView(), monitors);
     }
 
     // ── Wallpaper change pipeline ──────────────────────────────────────────────
@@ -455,59 +420,13 @@ class WallshiftApplet extends Applet.IconApplet {
             this._pendingChange = true;
             return;
         }
-
-        let allMonitors   = this._monitorManager.getMonitors();
-        let assignments   = {};
-        let monitorImages = {};
-
-        if (this._syncMode) {
-            // All enabled monitors get the same image from the sync pool.
-            let eligible = allMonitors.filter(m => this._getSlotConfig(m.name).enabled);
-            if (eligible.length === 0) return;
-
-            let pool = this._syncPool;
-            if (!pool || pool.getCount() === 0) {
-                Utils.warn('Sync pool is empty — skipping change');
-                return;
-            }
-            let path = pool.next();
-            for (let mon of eligible) {
-                assignments[mon.name]   = this._assignment(mon.name, path);
-                monitorImages[mon.name] = path;
-            }
-        } else {
-            // Each monitor advances independently, skipping globally- or
-            // individually-paused monitors.
-            let eligible = allMonitors.filter(m => {
-                let slot = this._getSlotConfig(m.name);
-                return slot.enabled && !this._stateManager.isMonitorPaused(m.name);
-            });
-            if (eligible.length === 0) return;
-
-            for (let mon of eligible) {
-                let pool = this._imagePools.get(mon.name);
-                let path = pool ? pool.next() : null;
-                if (!path) {
-                    let rec = this._stateManager.getMonitorRecord(mon.name);
-                    path = rec ? rec.currentImage : null;
-                }
-                if (path) {
-                    assignments[mon.name]   = this._assignment(mon.name, path);
-                    monitorImages[mon.name] = path;
-                }
-            }
-
-            // Carry forward the current image for paused/disabled monitors so the
-            // composite includes them unchanged (not recorded as a new change).
-            this._carryForwardCurrent(assignments, allMonitors);
-        }
-
-        if (Object.keys(monitorImages).length === 0) {
-            Utils.warn('No images available on any eligible monitor');
-            return;
-        }
-
-        this._compose(allMonitors, assignments, true, monitorImages);
+        let monitors = this._monitorManager.getMonitors();
+        let plan = Rotation.advance(this._rotationView(), monitors,
+            { sync: !!this._syncMode, syncPool: this._syncPool, pools: this._imagePools });
+        if (plan.skip === 'sync-empty') Utils.warn('Sync pool is empty — skipping change');
+        if (plan.skip === 'no-images')  Utils.warn('No images available on any eligible monitor');
+        if (plan.skip) return;
+        this._compose(monitors, plan.assignments, true, plan.monitorImages);
     }
 
     // Apply a specific image to one monitor, leaving all others at their current image.
@@ -515,27 +434,9 @@ class WallshiftApplet extends Applet.IconApplet {
     // all of them (a carousel click is the only caller that reaches here in Sync mode).
     _applyImageToMonitor(monitorName, path) {
         if (this._compositeInProgress) return;
-        let allMonitors = this._monitorManager.getMonitors();
-        let assignments = {};
-        let monImages   = {};
-
-        let targets = [monitorName];
-        if (this._syncMode) {
-            let enabled = allMonitors
-                .filter(m => this._getSlotConfig(m.name).enabled)
-                .map(m => m.name);
-            if (enabled.length > 0) targets = enabled;
-        }
-        for (let name of targets) {
-            assignments[name] = this._assignment(name, path);
-            monImages[name]   = path;
-        }
-
-        // All other monitors keep their current image — recorded so the resulting
-        // history snapshot captures the full desktop, not just the changed monitor.
-        this._carryForwardCurrent(assignments, allMonitors, monImages);
-
-        this._compose(allMonitors, assignments, true, monImages);
+        let monitors = this._monitorManager.getMonitors();
+        let plan = Rotation.applyImage(this._rotationView(), monitors, monitorName, path, !!this._syncMode);
+        this._compose(monitors, plan.assignments, true, plan.monitorImages);
         this._resetTimer();
     }
 
@@ -562,21 +463,11 @@ class WallshiftApplet extends Applet.IconApplet {
             this._navigatePrevious();
             return;
         }
-
-        let rec     = this._stateManager.getMonitorRecord(monitorName);
-        let current = rec ? rec.currentImage : null;
-        let len     = this._stateManager.getHistoryLength();
-
-        for (let i = 1; i <= len; i++) {
-            let entry = this._stateManager.getHistoryAt(i);
-            if (!entry) break;
-            let path = entry.monitors[monitorName];
-            if (path && path !== current && Utils.fileExists(path)) {
-                this._applyImageToMonitor(monitorName, path);
-                return;
-            }
-        }
-        Utils.warn('No previous image in history for ' + monitorName);
+        let sm   = this._stateManager;
+        let path = Rotation.monitorPrevious(this._rotationView(), monitorName,
+            { length: sm.getHistoryLength(), at: i => sm.getHistoryAt(i) });
+        if (path) this._applyImageToMonitor(monitorName, path);
+        else      Utils.warn('No previous image in history for ' + monitorName);
     }
 
     // Core async pipeline: compositor → apply → save state → notify.
@@ -594,11 +485,7 @@ class WallshiftApplet extends Applet.IconApplet {
 
                 if (isNewChange && monitorImages) {
                     // Monitors whose image actually changed (the rest were carried forward).
-                    let changed = monitors.filter(m => {
-                        if (!monitorImages[m.name]) return false;
-                        let rec = this._stateManager.getMonitorRecord(m.name);
-                        return !rec || rec.currentImage !== monitorImages[m.name];
-                    });
+                    let changed = Rotation.changedMonitors(this._rotationView(), monitors, monitorImages);
                     for (let name in monitorImages) {
                         this._stateManager.setMonitorCurrentImage(name, monitorImages[name]);
                     }
@@ -648,28 +535,24 @@ class WallshiftApplet extends Applet.IconApplet {
     // ── Global history navigation ──────────────────────────────────────────────
 
     _navigatePrevious() {
-        let entry = this._stateManager.getHistoryAt(this._historyPosition + 1);
-        if (!entry) return;
-        this._historyPosition++;
-        this._applyHistoryEntry(entry);
+        let step = Rotation.historyStep(this._historyPosition, 'back', i => this._stateManager.getHistoryAt(i));
+        if (!step) return;
+        this._historyPosition = step.position;
+        this._applyHistoryEntry(step.entry);
         this._resetTimer();
     }
 
     _navigateNext() {
-        if (this._historyPosition === 0) {
+        let step = Rotation.historyStep(this._historyPosition, 'forward', i => this._stateManager.getHistoryAt(i));
+        this._historyPosition = step.position;
+        if (step.kind === 'advance') {
             this._changeWallpaper();
+        } else if (step.kind === 'restore') {
+            let monitors    = this._monitorManager.getMonitors();
+            let assignments = this._restoreAssignments(monitors);
+            if (Object.keys(assignments).length > 0) this._compose(monitors, assignments, false, null);
         } else {
-            this._historyPosition--;
-            if (this._historyPosition === 0) {
-                let monitors    = this._monitorManager.getMonitors();
-                let assignments = this._restoreAssignments(monitors);
-                if (Object.keys(assignments).length > 0) {
-                    this._compose(monitors, assignments, false, null);
-                }
-            } else {
-                let entry = this._stateManager.getHistoryAt(this._historyPosition);
-                if (entry) this._applyHistoryEntry(entry);
-            }
+            this._applyHistoryEntry(step.entry);
         }
         this._resetTimer();
     }
@@ -677,7 +560,7 @@ class WallshiftApplet extends Applet.IconApplet {
     _applyHistoryEntry(entry) {
         if (!entry) return;
         let monitors    = this._monitorManager.getMonitors();
-        let assignments = this._historyAssignments(entry, monitors);
+        let assignments = Rotation.fromHistory(this._rotationView(), monitors, entry);
         if (Object.keys(assignments).length > 0) {
             this._compose(monitors, assignments, false, null);
         }
@@ -697,10 +580,11 @@ class WallshiftApplet extends Applet.IconApplet {
         let name = src.split('/').pop();
         let favDir = this._favoritesDir();
         if (!this._isFavorite(src)) {
-            if (this._copyToFavorites(src)) {
+            this._copyToFavorites(src, ok => {
+                if (!ok || this._destroyed) return;
                 this._notify(_('Wallshift'), _('Saved to Favorites: %s').replace('%s', name));
                 if (this._carouselManager) this._carouselManager.refreshFavorite();
-            }
+            });
             return;
         }
         // The image itself lives in the favorites folder: removing "the copy"
@@ -769,29 +653,21 @@ class WallshiftApplet extends Applet.IconApplet {
 
     // ── Shared helpers ─────────────────────────────────────────────────────────
 
-    _copyToFavorites(src) {
+    // Copy an image into the favorites folder in the background (`cp`, so a large
+    // image is never read on Cinnamon's main thread). done(ok) when finished.
+    _copyToFavorites(src, done) {
         let favDir = this._favoritesDir();
-        try {
-            Utils.ensureDir(favDir);
-            let dest = favDir + '/' + src.split('/').pop();
-
-            // Use GLib read/write instead of Gio.File.copy() — the GIO binding in
-            // Cinnamon's CJS runtime can silently no-op without throwing.
-            let [ok, contents] = GLib.file_get_contents(src);
-            if (!ok || !contents) {
-                Utils.error('Favorite: could not read source file: ' + src);
-                return false;
+        Utils.ensureDir(favDir);
+        let dest = favDir + '/' + src.split('/').pop();
+        Utils.spawnAsync(['cp', '--', src, dest], (err, _out, stderr, code) => {
+            if (err || code !== 0) {
+                Utils.error('Favorite copy failed for ' + src + ': ' +
+                    ((stderr || '').trim() || (err && err.message) || 'exit ' + code));
+                done(false);
+                return;
             }
-            if (!GLib.file_set_contents(dest, contents)) {
-                Utils.error('Favorite: could not write destination: ' + dest);
-                return false;
-            }
-
-            return true;
-        } catch(e) {
-            Utils.error('Favorite copy failed for ' + src + ': ' + e.message);
-            return false;
-        }
+            done(true);
+        });
     }
 
     _trashPath(path) {
@@ -812,39 +688,17 @@ class WallshiftApplet extends Applet.IconApplet {
     // With 2 monitors this is a pure swap (A↔B).
     // With 3+ it's a left rotation (A→B→C→A).
     _swapImages() {
-        let allMonitors = this._monitorManager.getMonitors();
-
-        // Build ordered list of monitors that have a current image.
-        let eligible = allMonitors.filter(m => {
-            let rec = this._stateManager.getMonitorRecord(m.name);
-            return rec && rec.currentImage;
-        });
-        if (eligible.length < 2) return;
-
-        // Collect paths in order, then rotate left by one position.
-        let paths   = eligible.map(m => this._stateManager.getMonitorRecord(m.name).currentImage);
-        let rotated = paths.slice(1).concat(paths[0]);
-
-        // Build assignments: eligible monitors get the rotated images.
-        let assignments  = {};
-        let monitorImages = {};
-        for (let i = 0; i < eligible.length; i++) {
-            let mon = eligible[i];
-            assignments[mon.name]   = this._assignment(mon.name, rotated[i]);
-            monitorImages[mon.name] = rotated[i];
-        }
-
-        // Carry forward any monitors that had no image (shouldn't happen, but safe).
-        this._carryForwardCurrent(assignments, allMonitors);
-
-        this._compose(allMonitors, assignments, true, monitorImages);
+        let monitors = this._monitorManager.getMonitors();
+        let plan = Rotation.swap(this._rotationView(), monitors);
+        if (!plan) return;
+        this._compose(monitors, plan.assignments, true, plan.monitorImages);
         this._resetTimer();
     }
 
     // ── Open actions ───────────────────────────────────────────────────────────
 
     _openImageInViewer(path) {
-        if (path) GLib.spawn_command_line_async('xdg-open "' + path + '"');
+        if (path) Utils.launch(['xdg-open', path]);
     }
 
     _openCurrentFolder() {
@@ -858,7 +712,7 @@ class WallshiftApplet extends Applet.IconApplet {
         }
         if (!fallback) return;
         let folder = fallback.substring(0, fallback.lastIndexOf('/'));
-        GLib.spawn_command_line_async('xdg-open "' + folder + '"');
+        Utils.launch(['xdg-open', folder]);
     }
 
     // ── Monitor topology changes ───────────────────────────────────────────────
@@ -885,23 +739,17 @@ class WallshiftApplet extends Applet.IconApplet {
     //   otherwise    → one submenu per monitor, "· paused" on paused ones
 
     _buildMenu() {
-        let nextItem = this._iconItem(_('Next Wallpaper'), ICONS.next, () => this._navigateNext());
-        this.menu.addMenuItem(nextItem);
+        this.menu.addMenuItem(this._actionItem('next'));
 
-        this._prevItem = this._iconItem(_('Previous Wallpaper'), ICONS.previous, () => this._navigatePrevious());
+        this._prevItem = this._actionItem('previous');
         this.menu.addMenuItem(this._prevItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        this._pauseItem = new PopupMenu.PopupSwitchIconMenuItem(
-            _('Pause Rotation'), this._stateManager.isPaused(), ICONS.pause, St.IconType.SYMBOLIC);
-        this._pauseItem.connect('toggled', () => this._onPauseToggled(this._pauseItem.state));
+        this._pauseItem = this._actionSwitch('pause', null, this._stateManager.isPaused());
         this.menu.addMenuItem(this._pauseItem);
 
-        this._swapItem = this._iconItem(_('Swap Images'), ICONS.swap, () => {
-            this.menu.close();
-            this._swapImages();
-        });
+        this._swapItem = this._actionItem('swap');
         this.menu.addMenuItem(this._swapItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -911,21 +759,42 @@ class WallshiftApplet extends Applet.IconApplet {
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        this.menu.addMenuItem(this._iconItem(_('Refresh Monitors'), ICONS.refresh, () => {
-            this.menu.close();
-            this._refreshMonitors();
-        }));
-        this.menu.addMenuItem(this._iconItem(_('Open Image Folder'), ICONS.folder,
-            () => this._openCurrentFolder()));
+        this.menu.addMenuItem(this._actionItem('refresh-monitors'));
+        this.menu.addMenuItem(this._actionItem('open-folder'));
 
         this.menu.connect('open-state-changed', (_menu, open) => {
             if (open) this._updateMenuState();
         });
     }
 
-    _iconItem(label, icon, onActivate) {
-        let item = new PopupMenu.PopupIconMenuItem(label, icon, St.IconType.SYMBOLIC);
-        item.connect('activate', onActivate);
+    // Run a command from modules/Actions.js. Every menu row, carousel button,
+    // scroll and middle-click goes through here.
+    _runAction(id, monitorName, value) {
+        if (this._destroyed) return false;
+        return Actions.run(this, id, monitorName, value);
+    }
+
+    // A menu row for a command; label / icon default to the command's own.
+    _actionItem(id, monitorName, label, icon) {
+        let def  = Actions.ACTIONS[id];
+        let item = new PopupMenu.PopupIconMenuItem(label || def.label(), icon || def.icon, St.IconType.SYMBOLIC);
+        item.actionId = id;
+        item.connect('activate', () => {
+            if (def.closesMenu) this.menu.close();
+            this._runAction(id, monitorName);
+        });
+        return item;
+    }
+
+    // A switch row for an on/off command (pause, carousel).
+    _actionSwitch(id, monitorName, state, label) {
+        let def  = Actions.ACTIONS[id];
+        let item = new PopupMenu.PopupSwitchIconMenuItem(label || def.label(), state, def.icon, St.IconType.SYMBOLIC);
+        item.actionId = id;
+        item.connect('toggled', () => {
+            if (def.closesMenu) this.menu.close();
+            this._runAction(id, monitorName, item.state);
+        });
         return item;
     }
 
@@ -1003,54 +872,28 @@ class WallshiftApplet extends Applet.IconApplet {
         let rec     = this._stateManager.getMonitorRecord(monName);
         let current = rec ? rec.currentImage : null;
 
-        let carousel = new PopupMenu.PopupSwitchIconMenuItem(opts.carouselLabel,
-            this._carouselManager.isOpen(monName), ICONS.carousel, St.IconType.SYMBOLIC);
-        carousel.connect('toggled', () => {
-            this.menu.close();
-            if (carousel.state) this._carouselManager.openCarousel(mon);
-            else                this._carouselManager.closeCarousel(monName);
-        });
-        menu.addMenuItem(carousel);
+        menu.addMenuItem(this._actionSwitch('carousel', monName,
+            this._carouselManager.isOpen(monName), opts.carouselLabel));
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         menu.addMenuItem(this._fileRow(current));
 
         if (opts.perMonitor) {
             menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-            menu.addMenuItem(this._iconItem(_('Next Image'), ICONS.next, () => {
-                this.menu.close();
-                this._changeMonitorWallpaper(monName);
-            }));
-            menu.addMenuItem(this._iconItem(_('Previous Image'), ICONS.previous, () => {
-                this.menu.close();
-                this._navigateMonitorPrevious(monName);
-            }));
-            let pause = new PopupMenu.PopupSwitchIconMenuItem(_('Pause Rotation'),
-                this._stateManager.isMonitorPaused(monName), ICONS.pause, St.IconType.SYMBOLIC);
-            pause.connect('toggled', () => {
-                this._stateManager.setMonitorPaused(monName, pause.state);
-                this._updateTooltip();
-            });
-            menu.addMenuItem(pause);
+            menu.addMenuItem(this._actionItem('monitor-next', monName));
+            menu.addMenuItem(this._actionItem('monitor-previous', monName));
+            menu.addMenuItem(this._actionSwitch('monitor-pause', monName,
+                this._stateManager.isMonitorPaused(monName)));
         }
 
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         let fav = current && this._isFavorite(current);
-        menu.addMenuItem(this._iconItem(fav ? _('Remove from Favorites') : _('Favorite This Image'),
-            fav ? ICONS.starred : ICONS.favorite, () => {
-                this.menu.close();
-                this._toggleFavorite(monName);
-            }));
-        menu.addMenuItem(this._iconItem(_('Trash This Image'), ICONS.trash, () => {
-            this.menu.close();
-            this._trashMonitorImage(monName);
-        }));
+        menu.addMenuItem(fav
+            ? this._actionItem('favorite', monName, _('Remove from Favorites'), ICONS.starred)
+            : this._actionItem('favorite', monName));
+        menu.addMenuItem(this._actionItem('trash', monName));
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        menu.addMenuItem(this._iconItem(_('Open in Image Viewer'), ICONS.viewer, () => {
-            this.menu.close();
-            let r = this._stateManager.getMonitorRecord(monName);
-            this._openImageInViewer(r ? r.currentImage : null);
-        }));
+        menu.addMenuItem(this._actionItem('open-viewer', monName));
     }
 
     _onPauseToggled(paused) {
@@ -1096,8 +939,8 @@ class WallshiftApplet extends Applet.IconApplet {
     _onPanelScroll(event) {
         if (this._compositeInProgress || !this._monitorsReady) return Clutter.EVENT_STOP;
         let dir = event.get_scroll_direction();
-        if (dir === Clutter.ScrollDirection.UP)        this._navigatePrevious();
-        else if (dir === Clutter.ScrollDirection.DOWN) this._navigateNext();
+        if (dir === Clutter.ScrollDirection.UP)        this._runAction('previous');
+        else if (dir === Clutter.ScrollDirection.DOWN) this._runAction('next');
         return Clutter.EVENT_STOP;
     }
 
@@ -1110,7 +953,7 @@ class WallshiftApplet extends Applet.IconApplet {
     // Middle-click: pause / resume rotation.
     on_applet_middle_clicked() {
         if (!this._stateManager) return;
-        this._onPauseToggled(!this._stateManager.isPaused());
+        this._runAction('pause');
     }
 
     // Cinnamon calls this when the applet is removed from a panel and, before

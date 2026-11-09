@@ -96,4 +96,18 @@ T.run('changeNotificationBody: a line per changed monitor, one line for Sync (0.
     T.eq(Utils.changeNotificationBody([{ displayName: 'ACME 27Q', path: '/w/a.jpg' }]), 'ACME 27Q: a.jpg');
 });
 
+T.runAsync('launch passes each argument intact and reports a missing program (0.2.3)', done => {
+    const dir = T.tmpDir('launch');
+    const odd = 'it\'s "quoted" $HOME & co.jpg';
+    T.ok(Utils.launch(['/bin/sh', '-c', 'printf %s "$1" > "$2"', 'sh', odd, dir + '/out']), 'started');
+    T.eq(Utils.launch(['/nonexistent/wallshift-viewer', odd]), false, 'missing program → false, no throw');
+    let tries = 0;
+    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+        if (!GLib.file_test(dir + '/out', GLib.FileTest.EXISTS) && ++tries < 40) return GLib.SOURCE_CONTINUE;
+        T.eq(T.readFile(dir + '/out'), odd, 'the program received the argument unchanged');
+        done();
+        return GLib.SOURCE_REMOVE;
+    });
+}, 10);
+
 imports.system.exit(T.summary());

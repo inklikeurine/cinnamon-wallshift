@@ -1,0 +1,36 @@
+{
+  "names": {
+    "named-block1.bin": "ACME 27Q",
+    "named-block4.bin": "Contoso U32",
+    "no-name.bin": null,
+    "full-13-chars.bin": "ABCDEFGHIJKLM",
+    "non-ascii.bin": "Caf View",
+    "blank-name.bin": null,
+    "padded-name.bin": "Wide 34",
+    "two-names.bin": "First"
+  },
+  "candidates": {
+    "HDMI-1": [
+      "HDMI-1",
+      "HDMI-A-1",
+      "HDMI-B-1"
+    ],
+    "HDMI-12": [
+      "HDMI-12",
+      "HDMI-A-12",
+      "HDMI-B-12"
+    ],
+    "HDMI-A-1": [
+      "HDMI-A-1"
+    ],
+    "DP-2": [
+      "DP-2"
+    ],
+    "eDP-1": [
+      "eDP-1"
+    ],
+    "Monitor-0": [
+      "Monitor-0"
+    ]
+  }
+}

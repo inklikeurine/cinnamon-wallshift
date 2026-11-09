@@ -46,7 +46,10 @@ var ImagePool = class ImagePool {
     // current image). If scan() is called again before the previous one finishes,
     // the earlier results are discarded so the pool always reflects the latest
     // configuration. Never blocks the main thread.
-    scan(callback) {
+    // scanFolder(folder, cb): optional — a sharedScanner() lets several pools on
+    // the same folder share one `find` run; default runs `find` for this pool.
+    scan(callback, scanFolder) {
+        let scanOne = scanFolder || findImages;
         let gen     = ++this._scanGen;
         let folders = this._folders.slice();
         let found   = [];
@@ -67,7 +70,7 @@ var ImagePool = class ImagePool {
 
         if (pending === 0) { finish(); return; }
         for (let folder of folders) {
-            this._scanFolder(folder, paths => {
+            scanOne(folder, paths => {
                 found.push(...paths);
                 if (--pending === 0) finish();
             });
@@ -123,36 +126,54 @@ var ImagePool = class ImagePool {
             this._queue = Utils.shuffle(this._allImages.slice());
         }
     }
+};
 
-    // ── Internal ───────────────────────────────────────────────────────────────
+// Run `find` for one folder via Gio.Subprocess and hand back the matching paths.
+// argv form (no shell) so folder names with quotes or spaces are safe.
+var findImages = function(folderPath, callback) {
+    let argv = ['find', folderPath, '-not', '-path', '*/.*', '-type', 'f', '('];
+    Utils.IMAGE_EXTENSIONS.forEach((ext, i) => {
+        if (i > 0) argv.push('-o');
+        argv.push('-iname', '*' + ext);
+    });
+    argv.push(')');
 
-    // Run `find` for one folder via Gio.Subprocess and hand back the matching paths.
-    // argv form (no shell) so folder names with quotes or spaces are safe.
-    _scanFolder(folderPath, callback) {
-        let argv = ['find', folderPath, '-not', '-path', '*/.*', '-type', 'f', '('];
-        Utils.IMAGE_EXTENSIONS.forEach((ext, i) => {
-            if (i > 0) argv.push('-o');
-            argv.push('-iname', '*' + ext);
+    Utils.spawnAsync(argv, (err, stdout, stderr, exitCode) => {
+        if (err) {
+            Utils.error('find failed for ' + folderPath + ': ' + err.message);
+            callback([]);
+            return;
+        }
+        // find exits 1 if any subdirectory was unreadable but still lists the
+        // rest — keep whatever it found and just note the problem.
+        if (exitCode !== 0) {
+            Utils.warn('find reported errors under ' + folderPath +
+                (stderr ? ': ' + stderr.trim().split('\n')[0] : ''));
+        }
+        let lines = (stdout || '')
+            .split('\n')
+            .map(l => l.trim())
+            .filter(l => l.length > 0 && Utils.isImageFile(l));
+        callback(lines);
+    });
+};
+
+// A scanFolder for ImagePool.scan() that runs `find` once per folder, however
+// many pools ask for it in one round (monitors sharing a folder). Use a fresh
+// one per round so a rescan sees new files. The pools get the same path list
+// and each builds its own queue from it.
+var sharedScanner = function() {
+    let folders = new Map();   // folder → { paths: string[] | null, waiting: cb[] }
+    return (folder, callback) => {
+        let entry = folders.get(folder);
+        if (entry && entry.paths) { callback(entry.paths); return; }
+        if (entry) { entry.waiting.push(callback); return; }
+        entry = { paths: null, waiting: [callback] };
+        folders.set(folder, entry);
+        findImages(folder, paths => {
+            entry.paths = paths;
+            for (let cb of entry.waiting) cb(paths);
+            entry.waiting = [];
         });
-        argv.push(')');
-
-        Utils.spawnAsync(argv, (err, stdout, stderr, exitCode) => {
-            if (err) {
-                Utils.error('find failed for ' + folderPath + ': ' + err.message);
-                callback([]);
-                return;
-            }
-            // find exits 1 if any subdirectory was unreadable but still lists the
-            // rest — keep whatever it found and just note the problem.
-            if (exitCode !== 0) {
-                Utils.warn('find reported errors under ' + folderPath +
-                    (stderr ? ': ' + stderr.trim().split('\n')[0] : ''));
-            }
-            let lines = (stdout || '')
-                .split('\n')
-                .map(l => l.trim())
-                .filter(l => l.length > 0 && Utils.isImageFile(l));
-            callback(lines);
-        });
-    }
+    };
 };

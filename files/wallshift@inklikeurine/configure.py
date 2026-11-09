@@ -160,15 +160,38 @@ def _monitor_config_path():
     return os.path.expanduser("~/.local/share/wallshift/monitor-config.json")
 
 
-def _load_monitor_config():
+# The applet reads the same file (modules/MonitorConfig.js); both are tested against
+# the shared samples in the workshop's tests/<uuid>/fixtures/monitor-config/.
+
+def _parse_monitor_config(text):
+    """File text → config; anything but an object with a "monitors" object → empty."""
     try:
-        with open(_monitor_config_path()) as f:
-            cfg = json.load(f)
+        cfg = json.loads(text)
         if isinstance(cfg, dict) and isinstance(cfg.get("monitors"), dict):
             return cfg
     except Exception:
         pass
     return {"monitors": {}}
+
+
+def _load_monitor_config():
+    try:
+        with open(_monitor_config_path()) as f:
+            return _parse_monitor_config(f.read())
+    except Exception:
+        return {"monitors": {}}
+
+
+def _monitor_overrides(cfg, connector):
+    """One monitor's own settings: {enabled, scaling, folder}, folder '' when unset."""
+    o = cfg.get("monitors", {}).get(connector)
+    if not isinstance(o, dict):
+        o = {}
+    scaling = o.get("scaling")
+    folder = o.get("folder")
+    return {"enabled": o.get("enabled", True) is not False,
+            "scaling": scaling if scaling in [v for v, _l in _SCALING] else "zoom",
+            "folder": _to_path(folder) if isinstance(folder, str) else ""}
 
 
 def _save_monitor_config(cfg):
@@ -179,7 +202,8 @@ def _save_monitor_config(cfg):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Monitor detection — the same names MonitorManager.js shows
+# Monitor detection — the same names MonitorManager.js shows (EDID parsing is
+# shared with modules/MonitorConfig.js and tested against fixtures/edid/)
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _parse_edid_monitor_name(data):
@@ -198,15 +222,20 @@ def _parse_edid_monitor_name(data):
     return None
 
 
-def _read_edid_name(connector):
-    """Friendly name from /sys/class/drm — same logic as MonitorManager.js."""
+def _edid_candidates(connector):
+    """sysfs names to try: GDK "HDMI-1" is DRM "HDMI-A-1" / "HDMI-B-1"; others match."""
     import re
     candidates = [connector]
     m = re.match(r'^HDMI-(\d+)$', connector)
     if m:
         candidates += [f'HDMI-A-{m.group(1)}', f'HDMI-B-{m.group(1)}']
+    return candidates
+
+
+def _read_edid_name(connector):
+    """Friendly name from /sys/class/drm — same logic as MonitorManager.js."""
     for card in range(4):
-        for cand in candidates:
+        for cand in _edid_candidates(connector):
             try:
                 with open(f'/sys/class/drm/card{card}-{cand}/edid', 'rb') as f:
                     data = f.read()
@@ -512,19 +541,18 @@ class _SettingsWindow:
 
     def _monitor_page(self, mon):
         connector = mon["connector"]
-        overrides = self._mon_cfg.setdefault("monitors", {}).get(connector, {})
+        overrides = _monitor_overrides(self._mon_cfg, connector)
         page = SettingsPage()
         section = page.add_section(_monitor_title(mon))
 
         enabled = Switch(_("Enabled"))
-        enabled.content_widget.set_active(overrides.get("enabled", True) is not False)
+        enabled.content_widget.set_active(overrides["enabled"])
         enabled.content_widget.connect("notify::active",
                                        lambda w, _p: self._set_monitor(connector, "enabled", w.get_active()))
         section.add_row(enabled)
 
         scaling = ComboBox(_("Scaling"), options=[(value, _(label)) for value, label in _SCALING])
-        current = overrides.get("scaling", "zoom")
-        scaling.content_widget.set_active_iter(scaling.option_map.get(current, scaling.option_map["zoom"]))
+        scaling.content_widget.set_active_iter(scaling.option_map[overrides["scaling"]])
 
         def on_scaling(combo):
             it = combo.get_active_iter()
@@ -546,7 +574,7 @@ class _SettingsWindow:
         section.add_row(folder)
         note = section.add_note("")
         note.get_style_context().add_class("dim-label")
-        state = {"path": _to_path(overrides.get("folder", ""))}
+        state = {"path": overrides["folder"]}
         if state["path"]:
             folder.content_widget.set_filename(state["path"])
 
@@ -583,12 +611,15 @@ class _SettingsWindow:
                 show_state()
 
     def _set_monitor(self, connector, field, value):
-        self._mon_cfg.setdefault("monitors", {}).setdefault(connector, {})[field] = value
+        monitors = self._mon_cfg.setdefault("monitors", {})
+        if not isinstance(monitors.get(connector), dict):   # a hand-edited non-object entry
+            monitors[connector] = {}
+        monitors[connector][field] = value
         _save_monitor_config(self._mon_cfg)
 
     def _clear_monitor(self, connector, field):
         mon = self._mon_cfg.get("monitors", {}).get(connector)
-        if mon and field in mon:
+        if isinstance(mon, dict) and field in mon:
             del mon[field]
             _save_monitor_config(self._mon_cfg)
 
