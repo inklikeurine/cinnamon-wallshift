@@ -1,7 +1,7 @@
 # --- AI agent state --------------------------------------------------------
 # .claude/settings.json (hook + permissions) and CLAUDE.md are committed on
 # purpose: a fresh clone keeps its guard rail. Per-user files are not.
-# Tests, docs and journals live in the private workshop (../_workshop/).
+# Tests are committed in tests/; harness output goes to ../cinnamon-tools/out/.
 .claude/*
 !.claude/settings.json
 CLAUDE.local.md
