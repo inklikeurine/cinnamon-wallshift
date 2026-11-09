@@ -3,6 +3,27 @@
 All notable changes to Wallshift are recorded here.
 Versions follow `metadata.json` (`version`).
 
+## [0.2.3] — 2026-11-09
+
+### Fixed
+- Opening the carousel no longer freezes the desktop. With a large folder
+  (about 1,500 images) it used to lock everything for one to two seconds; it
+  now opens in well under a tenth of a second, whatever the folder size.
+- "Open in Image Viewer", "Open Image Folder" and the settings window now open
+  correctly when the image name or folder contains quotes, `$` or similar
+  characters.
+- A hand-edited `monitor-config.json` with unexpected content (for example
+  `null`, a list, or a number where a monitor's settings should be) no longer
+  breaks the applet or the settings window; such entries count as defaults.
+
+### Changed
+- Uses less CPU and memory: monitors that share a folder scan it once, and
+  carousel thumbnails are made several at a time instead of starting a new
+  helper process for each one (2 instead of 24 for a screenful).
+- Adding an image to Favorites copies it in the background, so a large image
+  never makes the desktop stutter.
+- Internal restructuring for reliability; nothing you see or set has changed.
+
 ## [0.2.2] — 2026-10-15
 
 ### Changed
