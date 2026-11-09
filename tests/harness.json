@@ -1,0 +1,31 @@
+{
+  "tests": true,
+  "live": true,
+  "wait": 6,
+  "pre": [
+    "(globalThis.__wallshiftPrev = imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]) instanceof Object"
+  ],
+  "evals": [
+    "imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine').length === 1",
+    "imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0] !== globalThis.__wallshiftPrev",
+    "globalThis.__wallshiftPrev._destroyed === true",
+    "globalThis.__wallshiftPrev._timerId === null && globalThis.__wallshiftPrev._monitorConfigTimer === null && globalThis.__wallshiftPrev._monitorConfigMonitor === null",
+    "globalThis.__wallshiftPrev._monitorManager === null && globalThis.__wallshiftPrev._carouselManager === null && globalThis.__wallshiftPrev._thumbnailCache === null",
+    "globalThis.__wallshiftPrev._settings === null && globalThis.__wallshiftPrev.menu === null && globalThis.__wallshiftPrev.menuManager === null",
+    "Object.values(imports.ui.main.settingsManager.uuids['wallshift@inklikeurine'] || {}).filter(Boolean).length === 1",
+    "typeof imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]._changeWallpaper === 'function'",
+    "imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]._imagePools instanceof Map",
+    "imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]._timerId !== null",
+    "imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]._scrollSigId > 0 && imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]._enterSigId > 0",
+    "!globalThis.__wallshiftPrev._scrollSigId && !globalThis.__wallshiftPrev._enterSigId",
+    "(function(){ const a = imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]; const lm = imports.ui.main.layoutManager; const before = lm._chrome._trackedActors.length; const m = a._monitorManager.getMonitors()[0]; if (!m) return true; a._carouselManager.openCarousel(m); const opened = a._carouselManager.isOpen(m.name) && lm._chrome._trackedActors.length === before + 2; a._carouselManager.closeCarousel(m.name, false); return opened && lm._chrome._trackedActors.length === before; })()",
+    "(function(){ const p = imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]._carouselManager._getColors(); return typeof p.surface === 'string' && p.surface.startsWith('rgba(') && p.accent.startsWith('rgba('); })()",
+    "typeof imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]._settings.getValue('carousel-edge') === 'string'",
+    "(function(){ const GLib = imports.gi.GLib; const a = imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]; return a._compositor._toolPath === a._metadata.path + '/imagetool.py' && GLib.file_test(a._compositor._toolPath, GLib.FileTest.IS_EXECUTABLE) && !('_imagemagickAvailable' in a); })()",
+    "(function(){ const Gio = imports.gi.Gio; const a = imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]; const mons = a._monitorManager.getMonitors(); if (mons.length < 2) return true; if (a._compositeInProgress) return false; const s = new Gio.Settings({schema_id: 'org.cinnamon.desktop.background'}); const f = Gio.File.new_for_uri(s.get_string('picture-uri')); if (s.get_string('picture-options') !== 'spanned' || a._compositor._outputPaths.indexOf(f.get_path()) < 0) return false; const age = Date.now() / 1000 - f.query_info('time::modified', 0, null).get_modification_date_time().to_unix(); const [fmt, w, h] = imports.gi.GdkPixbuf.Pixbuf.get_file_info(f.get_path()); const c = a._compositor._totalCanvasSize(mons); return age < 30 && fmt.get_name() === 'jpeg' && w === c.width && h === c.height; })()",
+    "(function(){ const a = imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]; return a._applet_icon.icon_name === (a._stateManager.isPaused() ? 'wallshift-paused-symbolic' : 'wallshift-symbolic'); })()",
+    "(function(){ const Gtk = imports.gi.Gtk; const a = imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]; const t = Gtk.IconTheme.get_default(); return t.get_search_path().includes(a._metadata.path + '/icons') && ['wallshift-symbolic', 'wallshift-paused-symbolic'].every(n => { const i = t.lookup_icon(n, 16, 0); return i !== null && i.get_filename().startsWith(a._metadata.path + '/icons/'); }); })()",
+    "(function(){ const a = imports.ui.appletManager.getRunningInstancesForUuid('wallshift@inklikeurine')[0]; return a._applet_icon.icon_size > 0 && a._applet_icon.icon_size === a.getPanelIconSize(imports.gi.St.IconType.SYMBOLIC); })()"
+  ],
+  "screenshot": false
+}
