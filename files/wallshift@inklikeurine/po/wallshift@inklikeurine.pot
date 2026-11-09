@@ -7,7 +7,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: wallshift@inklikeurine 0.1.0\n"
-"Report-Msgid-Bugs-To: https://github.com/inklikeurine/cinnamon-applets/"
+"Report-Msgid-Bugs-To: https://github.com/inklikeurine/cinnamon-wallshift/"
 "issues\n"
 "POT-Creation-Date: 2026-10-12 22:01+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"

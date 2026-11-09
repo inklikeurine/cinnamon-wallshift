@@ -13,6 +13,8 @@ const Gdk  = imports.gi.Gdk;
 const GLib = imports.gi.GLib;
 const Main = imports.ui.main;
 
+const MonitorConfig = require('./modules/MonitorConfig');   // relative to the applet dir, as in applet.js
+
 var MonitorManager = class MonitorManager {
 
     constructor(applet) {
@@ -103,42 +105,18 @@ var MonitorManager = class MonitorManager {
         this._monitors = monitors;
     }
 
-    // Read the monitor's friendly name from /sys/class/drm/.../edid.
-    // GDK connector names (e.g. "HDMI-1") differ from DRM sysfs names
-    // (e.g. "card0-HDMI-A-1") only for HDMI — everything else matches directly.
+    // Read the monitor's friendly name from /sys/class/drm/.../edid
+    // (candidates and parsing in MonitorConfig.js, shared with configure.py).
     _readEdidName(connector) {
-        let candidates = [connector];
-        let m = connector.match(/^HDMI-(\d+)$/);
-        if (m) candidates.push('HDMI-A-' + m[1], 'HDMI-B-' + m[1]);
-
         for (let card = 0; card < 4; card++) {
-            for (let cand of candidates) {
+            for (let cand of MonitorConfig.edidCandidates(connector)) {
                 try {
                     let path = '/sys/class/drm/card' + card + '-' + cand + '/edid';
                     let [ok, data] = GLib.file_get_contents(path);
                     if (!ok || !data || data.length < 128) continue;
-                    let name = this._parseEdidMonitorName(data);
+                    let name = MonitorConfig.parseEdidName(data);
                     if (name) return name;
                 } catch(e) {}
-            }
-        }
-        return null;
-    }
-
-    // Scan the four 18-byte descriptor blocks in the base EDID for a
-    // Monitor Name descriptor (tag 0xFC) and return its ASCII string.
-    _parseEdidMonitorName(data) {
-        for (let block = 0; block < 4; block++) {
-            let o = 54 + block * 18;
-            if (data[o]   === 0x00 && data[o+1] === 0x00 &&
-                data[o+2] === 0x00 && data[o+3] === 0xFC) {
-                let name = '';
-                for (let j = 5; j < 18; j++) {
-                    let c = data[o + j];
-                    if (c === 0x0A) break;          // 0x0A = end-of-name marker
-                    if (c >= 0x20 && c < 0x7F) name += String.fromCharCode(c);
-                }
-                return name.trim() || null;
             }
         }
         return null;

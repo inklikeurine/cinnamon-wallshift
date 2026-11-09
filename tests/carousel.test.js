@@ -127,4 +127,36 @@ T.run('thumbnail cache: the medium sizes keep their old file names', () => {
     tc.destroy();
 });
 
+// ── 0.2.3: virtual strip ───────────────────────────────────────────────────────
+
+T.run('contentLength matches a box of N items with spacing between them', () => {
+    T.eq(L.contentLength(0, 255, 5), 0);
+    T.eq(L.contentLength(1, 255, 5), 250);
+    T.eq(L.contentLength(1454, 255, 5), 1454 * 250 + 1453 * 5, '1454 thumbnails, 250 px + 5 px spacing');
+});
+
+T.run('visibleRange: the visible thumbnails plus a buffer, clamped', () => {
+    const step = 255, pad = L.STRIP_PAD;
+    T.eq(L.visibleRange(0, 2560, step, 1454, 8), { first: 0, last: Math.ceil((2560 - pad) / step) + 8 }, 'at the start');
+    const mid = L.visibleRange(100 * step, 2560, step, 1454, 8);
+    T.ok(mid.first <= 100 - 8 + 1 && mid.first >= 100 - 9, 'first: buffer before the visible part (' + mid.first + ')');
+    T.ok(mid.last >= 100 + Math.floor(2560 / step) + 8, 'last: buffer after it (' + mid.last + ')');
+    T.eq(L.visibleRange(1454 * step, 2560, step, 1454, 8).last, 1453, 'clamped at the end');
+    T.eq(L.visibleRange(0, 2560, step, 3, 8), { first: 0, last: 2 }, 'few images: all of them');
+    T.eq(L.visibleRange(0, 2560, step, 0, 8), { first: 0, last: -1 }, 'empty');
+    const r = L.visibleRange(40 * step, 1920, step, 1454, 8);
+    T.ok(r.last - r.first + 1 < 40, 'a 1920 px strip builds under 40 of 1454 thumbnails (' + (r.last - r.first + 1) + ')');
+});
+
+T.run('every visible pixel is covered: no gap between built ranges while scrolling', () => {
+    const step = 255, n = 500, view = 1920;
+    for (let pos = 0; pos < n * step; pos += 97) {
+        const r = L.visibleRange(pos, view, step, n, 0);
+        const firstVisible = Math.max(0, Math.floor((pos - L.STRIP_PAD) / step));
+        const lastVisible  = Math.min(n - 1, Math.floor((pos + view - L.STRIP_PAD) / step));
+        if (r.first > firstVisible || r.last < lastVisible) { T.ok(false, 'gap at ' + pos); return; }
+    }
+    T.ok(true, 'covered at every scroll position');
+});
+
 imports.system.exit(T.summary());

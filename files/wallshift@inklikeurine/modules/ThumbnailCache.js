@@ -4,14 +4,21 @@
 // Cache key: MD5 of the absolute image path + size suffix + '.jpg'
 //   250×140 (landscape, medium): _l250    140×250 (portrait, medium): _p250
 //   any other size W×H:          _WxH     (the carousel's small / large sizes)
-// Max concurrent imagetool.py jobs: 4 (queues excess requests, never drops them)
+//
+// Thumbnails are made by `imagetool.py thumbs`, many per process: starting Python
+// costs about ten times one thumbnail, so requests made together (the carousel
+// asks for a screenful in one go) are gathered on the next idle and split over at
+// most MAX_WORKERS processes. Each result arrives as its own line, so a thumbnail
+// shows as soon as it is ready, not when its whole batch is. Requests are queued,
+// never dropped.
 
 const GLib = imports.gi.GLib;
 const Gio  = imports.gi.Gio;
 
 const Utils = require('./modules/Utils');   // relative to the applet dir, as in applet.js
 
-const MAX_CONCURRENT = 4;
+const MAX_WORKERS = 2;
+const MAX_BATCH   = 16;
 
 // The medium sizes keep their pre-0.1.0 suffixes so existing caches stay valid.
 function sizeSuffix(w, h) {
@@ -26,19 +33,21 @@ var ThumbnailCache = class ThumbnailCache {
     constructor(stateDir, toolPath) {
         this._cacheDir   = stateDir + '/thumbnails';
         this._toolPath   = toolPath;
-        this._activeJobs = 0;
-        this._queue      = [];       // pending { imagePath, isPortrait, cachePath, callbacks[] }
-        this._inFlight   = new Map(); // imagePath → callbacks[] (jobs currently running)
+        this._workers    = 0;
+        this._queue      = [];       // pending { imagePath, w, h, cachePath, callbacks[] }
+        this._inFlight   = new Map(); // cachePath → callbacks[] (jobs a worker has been given)
+        this._drainId    = 0;        // idle source that gathers this tick's requests
         this._destroyed  = false;
         Utils.ensureDir(this._cacheDir);
     }
 
     // Drop every queued job and ignore the results of the ones already running.
-    // Called when the applet leaves the panel: an imagetool.py process that is mid-way
-    // finishes on its own and its file stays in the cache for next time, but no
-    // callback into a torn-down carousel is made.
+    // Called when the applet leaves the panel: a worker that is mid-way finishes
+    // on its own and its files stay in the cache for next time, but no callback
+    // into a torn-down carousel is made.
     destroy() {
         this._destroyed = true;
+        if (this._drainId) { GLib.source_remove(this._drainId); this._drainId = 0; }
         this._queue     = [];
         this._inFlight.clear();
     }
@@ -54,8 +63,8 @@ var ThumbnailCache = class ThumbnailCache {
     // Ensures a thumbnail exists for the given image.
     //
     // If the cache file is already on disk, fires callback(null, cachePath) immediately.
-    // Otherwise generates it via imagetool.py (async). If a job for this path is already
-    // in flight, the callback is queued on that job rather than spawning a duplicate.
+    // Otherwise queues it for imagetool.py (async). A request for a file that is
+    // already queued or being made joins that job rather than adding a duplicate.
     //
     // callback: function(err, cachePath)
     ensureThumbnail(imagePath, w, h, callback) {
@@ -66,25 +75,39 @@ var ThumbnailCache = class ThumbnailCache {
             return;
         }
 
-        // Piggyback on an existing in-flight job for the same file.
         if (this._inFlight.has(cachePath)) {
             this._inFlight.get(cachePath).push(callback);
             return;
         }
+        let queued = this._queue.find(j => j.cachePath === cachePath);
+        if (queued) {
+            queued.callbacks.push(callback);
+            return;
+        }
 
-        // Queue for later dispatch.
         this._queue.push({ imagePath, w, h, cachePath, callbacks: [callback] });
-        this._drain();
+        this._scheduleDrain();
     }
 
     // ── Internal ───────────────────────────────────────────────────────────────
 
+    _scheduleDrain() {
+        if (this._drainId || this._destroyed) return;
+        this._drainId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._drainId = 0;
+            this._drain();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    // Hand the queue to free workers, split evenly (at most MAX_BATCH each).
     _drain() {
-        while (this._activeJobs < MAX_CONCURRENT && this._queue.length > 0) {
-            let job = this._queue.shift();
-            this._inFlight.set(job.cachePath, job.callbacks);
-            this._activeJobs++;
-            this._runJob(job);
+        while (!this._destroyed && this._workers < MAX_WORKERS && this._queue.length > 0) {
+            let free = MAX_WORKERS - this._workers;
+            let size = Math.min(MAX_BATCH, Math.ceil(this._queue.length / free));
+            let batch = this._queue.splice(0, size);
+            for (let job of batch) this._inFlight.set(job.cachePath, job.callbacks);
+            this._runBatch(batch);
         }
     }
 
@@ -100,24 +123,37 @@ var ThumbnailCache = class ThumbnailCache {
         }
     }
 
-    _runJob(job) {
-        Utils.spawnAsync([
-            '/usr/bin/python3', this._toolPath, 'thumb',
-            job.imagePath, String(job.w), String(job.h), job.cachePath
-        ], (err, _stdout, stderr, exitCode) => {
-            this._activeJobs--;
-            if (this._destroyed) return;
-            let callbacks = this._inFlight.get(job.cachePath) || [];
-            this._inFlight.delete(job.cachePath);
+    _runBatch(batch) {
+        this._workers++;
+        let pending = new Map(batch.map(job => [job.cachePath, job]));
+        let noise = [];   // anything imagetool printed that is not a result line
 
-            if (err || exitCode !== 0) {
-                Utils.warn('Thumbnail failed for ' + job.imagePath +
-                    ': ' + ((stderr || '').trim() || (err && err.message) || 'exit ' + exitCode));
+        let settle = (cachePath, message) => {
+            let job = pending.get(cachePath);
+            if (!job) return;
+            pending.delete(cachePath);
+            let callbacks = this._inFlight.get(cachePath) || [];
+            this._inFlight.delete(cachePath);
+            if (this._destroyed) return;
+            if (message) {
+                Utils.warn('Thumbnail failed for ' + job.imagePath + ': ' + message);
                 for (let cb of callbacks) cb(new Error('thumbnail generation failed'), null);
             } else {
-                for (let cb of callbacks) cb(null, job.cachePath);
+                for (let cb of callbacks) cb(null, cachePath);
             }
+        };
 
+        let jobs = batch.map(job => [job.imagePath, job.w, job.h, job.cachePath]);
+        Utils.spawnLines(['/usr/bin/python3', this._toolPath, 'thumbs', JSON.stringify(jobs)], line => {
+            let msg = null;
+            try { msg = JSON.parse(line); } catch(e) { /* not a result line */ }
+            if (msg && typeof msg.output === 'string') settle(msg.output, msg.ok ? null : (msg.error || 'failed'));
+            else if (line.trim()) noise.push(line.trim());
+        }, (err, exitCode) => {
+            this._workers--;
+            // Jobs the worker never reported on (it crashed or could not start).
+            let reason = (err && err.message) || noise.slice(-1)[0] || 'imagetool exited ' + exitCode;
+            for (let cachePath of [...pending.keys()]) settle(cachePath, reason);
             this._drain();
         });
     }

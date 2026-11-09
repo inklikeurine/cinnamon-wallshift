@@ -107,3 +107,23 @@ var chevron = function(edge, collapsed) {
     let away   = { bottom: 'go-up', top: 'go-down', left: 'go-next', right: 'go-previous' }[edge];
     return (collapsed ? away : toward) + '-symbolic';
 };
+
+// ── Virtual strip (0.2.3) ──────────────────────────────────────────────────────
+// The strip only builds the thumbnails near the visible part; these say which.
+// Thumbnail i starts at STRIP_PAD + i * step along the strip (step = thumbnail
+// length + spacing); `pos` is the scroll position, `view` the visible length.
+
+// Length of the content for `count` thumbnails without the padding: the same
+// extent a box of `count` items with `spacing` between them would have.
+var contentLength = function(count, step, spacing) {
+    return count > 0 ? count * step - spacing : 0;
+};
+
+// First and last index to build: the visible ones plus `buffer` on each side,
+// clamped to [0, count - 1]. Empty strip → { first: 0, last: -1 }.
+var visibleRange = function(pos, view, step, count, buffer) {
+    if (count <= 0) return { first: 0, last: -1 };
+    let first = Math.floor((pos - STRIP_PAD) / step) - buffer;
+    let last  = Math.ceil((pos + view - STRIP_PAD) / step) + buffer;
+    return { first: Math.max(0, first), last: Math.min(count - 1, Math.max(0, last)) };
+};

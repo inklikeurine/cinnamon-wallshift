@@ -13,6 +13,11 @@ Usage:
       scaled into its region. Scaling: zoom | fit | stretch | center | tile.
   /usr/bin/python3 imagetool.py thumb IMAGE WIDTH HEIGHT OUTPUT
       A WIDTH×HEIGHT fill-and-crop thumbnail.
+  /usr/bin/python3 imagetool.py thumbs JOBS_JSON
+      JOBS_JSON: [[IMAGE, WIDTH, HEIGHT, OUTPUT], ...] — many thumbnails in one
+      process (starting Python costs far more than one thumbnail). One line per
+      job on stdout as soon as it is done: {"output", "ok"[, "error"]}. A failed
+      job does not stop the rest; the exit code is 0 unless JOBS_JSON is bad.
 
 Output is JPEG, written beside OUTPUT and renamed into place, so a reader never
 sees a half-written file. Exits non-zero with a message on stderr on failure.
@@ -116,10 +121,23 @@ def thumb(path, w, h, output):
     _save(canvas, output, 85)
 
 
+def thumbs(jobs):
+    for path, w, h, output in jobs:
+        try:
+            thumb(path, int(w), int(h), output)
+            line = {'output': output, 'ok': True}
+        except Exception as e:
+            line = {'output': output, 'ok': False, 'error': str(e)}
+        sys.stdout.write(json.dumps(line) + '\n')
+        sys.stdout.flush()
+
+
 def main(argv):
     try:
         if len(argv) == 3 and argv[1] == 'compose':
             compose(json.loads(argv[2]))
+        elif len(argv) == 3 and argv[1] == 'thumbs':
+            thumbs(json.loads(argv[2]))
         elif len(argv) == 6 and argv[1] == 'thumb':
             thumb(argv[2], int(argv[3]), int(argv[4]), argv[5])
         else:

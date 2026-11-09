@@ -20,6 +20,10 @@
 //
 // Colours come from the Cinnamon theme (ThemeColors.js) and are re-read when the
 // theme changes; stylesheet.css holds sizes and spacing only.
+//
+// The strip is virtual (0.2.3): a canvas as long as all thumbnails would be, with
+// only the ones near the visible part built on it; scrolling builds and drops
+// them (_updateWindow). A folder of thousands of images opens as fast as ten.
 
 const St       = imports.gi.St;
 const Clutter  = imports.gi.Clutter;
@@ -36,7 +40,8 @@ const _ = Utils._;
 
 const THUMB_SPACING = 5;
 const THUMB_BORDER  = 3;     // always drawn (transparent unless current/hovered), so sizes never shift
-const LOAD_BUFFER   = 8;     // extra items loaded beyond the visible viewport
+const LOAD_BUFFER   = 8;     // thumbnails built and loaded beyond each end of the visible part
+const KEEP_BUFFER   = 24;    // built thumbnails further out than this are dropped again
 const ANIM_TIME     = 0.18;  // fade / collapse duration, seconds
 const NAME_HEIGHT   = 20;    // file-name band at the bottom of a thumbnail
 const BADGE_SIZE    = 20;
@@ -164,8 +169,8 @@ var CarouselManager = class CarouselManager {
                 applet._applyImageToMonitor(monitorName, path);
                 if (this._options.closeOnPick) this.closeCarousel(monitorName);
             },
-            onFavorite:  () => applet && applet._toggleFavorite(monitorName),
-            onTrash:     () => applet && applet._trashMonitorImage(monitorName),
+            onFavorite:  () => applet && applet._runAction('favorite', monitorName),
+            onTrash:     () => applet && applet._runAction('trash', monitorName),
             onClose:     () => this.closeCarousel(monitorName),
         };
     }
@@ -225,10 +230,13 @@ class Carousel {
         this._thumb        = Layout.thumbSize(this._opts.thumbSize, this._isPortrait);
         this._thickness    = Layout.stripThickness(this._thumb, this._isPortrait);
         this._thumbStep    = (this._isPortrait ? this._thumb.h : this._thumb.w) + THUMB_SPACING;
-        this._items        = [];
+        this._items        = new Map();   // index in _images → ThumbnailItem (built ones only)
+        this._canvas       = null;        // fixed-size content the items sit on
         this._collapsed    = false;
         this._destroyed    = false;
         this._scrollSigId  = 0;
+        this._upperSigId   = 0;
+        this._pendingScroll = -1;         // index to scroll to once the strip has its length
         this._idleIds      = new Set();
         this._chrome       = [];
         this._build();
@@ -237,14 +245,15 @@ class Carousel {
     // ── Public ─────────────────────────────────────────────────────────────────
 
     setCurrentImage(imagePath) {
-        let oldIdx = this._images.indexOf(this._currentImage);
-        if (oldIdx >= 0 && this._items[oldIdx]) this._items[oldIdx].setCurrent(false);
+        let oldItem = this._items.get(this._images.indexOf(this._currentImage));
+        if (oldItem) oldItem.setCurrent(false);
         this._currentImage = imagePath;
         this._updateActionButtons();
         let newIdx = this._images.indexOf(imagePath);
-        if (newIdx >= 0 && this._items[newIdx]) {
-            this._items[newIdx].setCurrent(true);
-            this._scrollToIndex(newIdx);
+        if (newIdx >= 0) {
+            let item = this._items.get(newIdx);
+            if (item) item.setCurrent(true);
+            this._scrollToIndex(newIdx);   // builds it if it was out of range
         }
     }
 
@@ -268,7 +277,7 @@ class Carousel {
         if (this._emptyLabel) this._emptyLabel.set_style('color: ' + colors.fg + ';');
         this._tab.set_style(Layout.tabFrameStyle(this._join, colors));
         for (let b of this._buttons) b.restyle();
-        for (let item of this._items) item.applyColors(colors);
+        for (let item of this._items.values()) item.applyColors(colors);
         this.updateFavorite();
     }
 
@@ -280,7 +289,7 @@ class Carousel {
         Tweener.addTween(this._strip, { opacity: 255, time: ANIM_TIME, transition: 'easeOutQuad' });
         this._moveTab(this._geom.tabOpen);
         this._setCollapsedControls(false);
-        this._loadVisibleThumbnails();
+        this._updateWindow();
     }
 
     collapse() {
@@ -317,8 +326,13 @@ class Carousel {
             try { this._adjustment().disconnect(this._scrollSigId); } catch(e) {}
             this._scrollSigId = 0;
         }
-        for (let item of this._items) item.alive = false;
-        this._items = [];
+        if (this._upperSigId) {
+            try { this._adjustment().disconnect(this._upperSigId); } catch(e) {}
+            this._upperSigId = 0;
+        }
+        for (let item of this._items.values()) item.alive = false;
+        this._items.clear();
+        this._canvas = null;
         for (let { actor } of this._chrome) {
             Tweener.removeTweens(actor);
             try { Main.layoutManager.removeChrome(actor); } catch(e) {}
@@ -377,7 +391,7 @@ class Carousel {
             } catch(e) {}
             this._connectScrollSignal();
             this._scrollToCurrentImage();
-            this._loadVisibleThumbnails();
+            this._updateWindow();
         });
     }
 
@@ -471,8 +485,9 @@ class Carousel {
     // ── Strip ──────────────────────────────────────────────────────────────────
 
     _rebuildStrip() {
-        for (let item of this._items) item.alive = false;
-        this._items = [];
+        for (let item of this._items.values()) item.alive = false;
+        this._items.clear();
+        this._canvas = null;
         this._box.destroy_all_children();
         if (this._emptyLabel) { this._emptyLabel.destroy(); this._emptyLabel = null; }
 
@@ -502,17 +517,45 @@ class Carousel {
             return;
         }
 
+        // One fixed-size canvas as long as all the thumbnails would be, so the
+        // scroll range is unchanged; only the thumbnails near the visible part are
+        // built on it (_updateWindow). Opening a folder of thousands of images
+        // used to build every thumbnail actor up front and freeze the shell.
         this._scrollView.show();
-        let currentIdx = this._images.indexOf(this._currentImage);
-        for (let i = 0; i < this._images.length; i++) {
-            let path = this._images[i];
-            let item = new ThumbnailItem(path, this._thumb, this._opts.fileNames, this._colors);
-            if (i === currentIdx) item.setCurrent(true);
-            item.connectClicked(() => { if (item.alive && !this._destroyed) this._ctx.onPick(path); });
-            this._items.push(item);
-            this._box.add_child(item.actor);
-        }
+        this._canvas = new St.Widget({ reactive: false });
+        this._box.add_child(this._canvas);
+        this._sizeCanvas();
+        this._updateWindow();
         this._updateActionButtons();
+    }
+
+    _sizeCanvas() {
+        let length = Layout.contentLength(this._images.length, this._thumbStep, THUMB_SPACING);
+        if (this._isPortrait) this._canvas.set_size(this._thumb.w, length);
+        else                  this._canvas.set_size(length, this._thumb.h);
+    }
+
+    // The images changed under the built thumbnails (trash): drop them, resize
+    // the canvas and build the visible ones again; the scroll position stays.
+    _relayout() {
+        for (let item of this._items.values()) { item.alive = false; item.actor.destroy(); }
+        this._items.clear();
+        if (!this._canvas || this._images.length === 0) { this._rebuildStrip(); return; }
+        this._sizeCanvas();
+        this._updateWindow();
+    }
+
+    _makeItem(i) {
+        let path = this._images[i];
+        let item = new ThumbnailItem(path, this._thumb, this._opts.fileNames, this._colors);
+        if (path === this._currentImage) item.setCurrent(true);
+        item.connectClicked(() => { if (item.alive && !this._destroyed) this._ctx.onPick(path); });
+        let offset = i * this._thumbStep;
+        if (this._isPortrait) item.actor.set_position(0, offset);
+        else                  item.actor.set_position(offset, 0);
+        this._canvas.add_child(item.actor);
+        this._items.set(i, item);
+        return item;
     }
 
     // ── Scroll ─────────────────────────────────────────────────────────────────
@@ -539,8 +582,14 @@ class Carousel {
 
     _connectScrollSignal() {
         try {
-            this._scrollSigId = this._adjustment().connect('notify::value',
-                () => this._loadVisibleThumbnails());
+            let adj = this._adjustment();
+            this._scrollSigId = adj.connect('notify::value', () => this._updateWindow());
+            // The strip gets its length at the first allocation, which can come
+            // after the opening scroll was asked for: apply it then.
+            this._upperSigId = adj.connect('notify::upper', () => {
+                if (this._pendingScroll >= 0) this._scrollToIndex(this._pendingScroll);
+                else this._updateWindow();
+            });
         } catch(e) {
             Utils.warn('Carousel: scroll signal failed: ' + e.message);
         }
@@ -552,44 +601,62 @@ class Carousel {
     }
 
     _scrollToIndex(idx) {
+        this._pendingScroll = idx;
         this._later(null, () => {
             try {
                 let adj = this._adjustment();
-                let viewport   = adj.page_size || this._thickness;
+                if (!adj.page_size || !(adj.upper > adj.page_size)) return;   // not laid out yet: notify::upper retries
+                this._pendingScroll = -1;
+                let viewport   = adj.page_size;
                 let itemCenter = idx * this._thumbStep + this._thumbStep / 2;
                 adj.value = Math.max(0, Math.min(itemCenter - viewport / 2, adj.upper - viewport));
             } catch(e) {}
         });
     }
 
-    // ── Lazy thumbnail loading ─────────────────────────────────────────────────
+    // ── Virtual strip: build and load only what is near the visible part ──────
 
-    _loadVisibleThumbnails() {
-        if (this._destroyed || this._collapsed) return;
+    _updateWindow() {
+        if (this._destroyed || !this._canvas) return;
+        let pos = 0, view = 0;
         try {
-            let adj   = this._adjustment();
-            let pos   = adj.value;
-            let view  = adj.page_size || this._thickness;
-            let first = Math.max(0, Math.floor(pos / this._thumbStep) - LOAD_BUFFER);
-            let last  = Math.min(this._items.length - 1,
-                Math.ceil((pos + view) / this._thumbStep) + LOAD_BUFFER);
-
-            for (let i = first; i <= last; i++) {
-                let item = this._items[i];
-                if (!item || item.loaded || !item.alive) continue;
-                item.loaded = true;
-                this._ctx.thumbCache.ensureThumbnail(item.path, this._thumb.w, this._thumb.h,
-                    (err, cachePath) => {
-                        if (!item.alive || err) return;
-                        if (!item.setTexture(cachePath)) {
-                            // Cache file was corrupt — delete and retry after a short delay
-                            item.loaded = false;
-                            try { GLib.unlink(cachePath); } catch(e) {}
-                            this._later(500, () => this._loadVisibleThumbnails());
-                        }
-                    });
-            }
+            let adj = this._adjustment();
+            pos  = adj.value;
+            view = adj.page_size;
         } catch(e) { /* not yet allocated */ }
+        if (!view) view = this._isPortrait ? this._geom.strip.h : this._geom.strip.w;
+        let n    = this._images.length;
+        let want = Layout.visibleRange(pos, view, this._thumbStep, n, LOAD_BUFFER);
+        let keep = Layout.visibleRange(pos, view, this._thumbStep, n, KEEP_BUFFER);
+
+        for (let [i, item] of this._items) {
+            if (i >= keep.first && i <= keep.last) continue;
+            item.alive = false;
+            item.actor.destroy();
+            this._items.delete(i);
+        }
+        for (let i = want.first; i <= want.last; i++) {
+            if (!this._items.has(i)) this._makeItem(i);
+        }
+        if (!this._collapsed) this._loadThumbnails(want);
+    }
+
+    _loadThumbnails(range) {
+        for (let i = range.first; i <= range.last; i++) {
+            let item = this._items.get(i);
+            if (!item || item.loaded || !item.alive) continue;
+            item.loaded = true;
+            this._ctx.thumbCache.ensureThumbnail(item.path, this._thumb.w, this._thumb.h,
+                (err, cachePath) => {
+                    if (!item.alive || err) return;
+                    if (!item.setTexture(cachePath)) {
+                        // Cache file was corrupt — delete and retry after a short delay
+                        item.loaded = false;
+                        try { GLib.unlink(cachePath); } catch(e) {}
+                        this._later(500, () => this._updateWindow());
+                    }
+                });
+        }
     }
 
     // ── Actions ────────────────────────────────────────────────────────────────
@@ -598,9 +665,7 @@ class Carousel {
         let idx = this._images.indexOf(this._currentImage);
         if (idx >= 0) {
             this._images.splice(idx, 1);
-            let item = this._items.splice(idx, 1)[0];
-            item.alive = false;
-            item.actor.destroy();
+            this._relayout();
         }
         this._ctx.onTrash();
     }

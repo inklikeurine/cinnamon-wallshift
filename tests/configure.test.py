@@ -62,6 +62,25 @@ open(cfg._monitor_config_path(), 'w').write('[1, 2]')
 check(cfg._load_monitor_config() == {'monitors': {}}, 'wrong shape → empty')
 os.remove(cfg._monitor_config_path())
 
+print('shared samples (0.2.3): the same answers as modules/MonitorConfig.js')
+FIX = os.path.join(sys.argv[2], 'fixtures')
+edid = json.load(open(os.path.join(FIX, 'edid', 'expected.json')))
+for name, want in edid['names'].items():
+    data = open(os.path.join(FIX, 'edid', name), 'rb').read()
+    check(cfg._parse_edid_monitor_name(data) == want, f'EDID {name} → {want!r}')
+for connector, want in edid['candidates'].items():
+    check(cfg._edid_candidates(connector) == want, f'candidates {connector} → {want}')
+for case in json.load(open(os.path.join(FIX, 'monitor-config', 'cases.json')))['cases']:
+    if case['text'] is None:
+        if os.path.exists(cfg._monitor_config_path()):
+            os.remove(cfg._monitor_config_path())
+        parsed = cfg._load_monitor_config()
+    else:
+        parsed = cfg._parse_monitor_config(case['text'])
+    check(parsed == case['config'], f"config: {case['name']}")
+    for mon, want in case['overrides'].items():
+        check(cfg._monitor_overrides(parsed, mon) == want, f"overrides: {case['name']} / {mon}")
+
 print('schema (labels come from settings-schema.json now)')
 schema = json.load(open(os.path.join(APPLET, 'settings-schema.json')))
 check(schema['layout']['page-general']['sections'][0] == 'section-folders', 'Folders first (S1)')
@@ -139,6 +158,14 @@ if os.environ.get('DISPLAY'):
     win._set_monitor('TEST-1', 'folder', '/w'); win._set_monitor('TEST-1', 'scaling', 'fit')
     win._clear_monitor('TEST-1', 'folder')
     check(json.load(open(cfg._monitor_config_path()))['monitors']['TEST-1'] == {'scaling': 'fit'}, 'clear drops only the folder (S3)')
+
+    print('hand-edited odd entries (0.2.3)')
+    win._mon_cfg['monitors']['TEST-ODD'] = 7
+    page = win._monitor_page({'name': 'Odd', 'connector': 'TEST-ODD', 'index': 9})
+    check(page is not None, 'a non-object monitor entry still builds its page')
+    win._set_monitor('TEST-ODD', 'scaling', 'fit')
+    check(json.load(open(cfg._monitor_config_path()))['monitors']['TEST-ODD'] == {'scaling': 'fit'}, 'and writing replaces it')
+    win._folder_rows.pop()
 
     print('live monitor tabs')
     win._stack.set_visible_child_name('monitor-TEST-1')

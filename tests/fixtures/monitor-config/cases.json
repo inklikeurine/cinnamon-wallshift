@@ -1,0 +1,162 @@
+{
+  "_about": "Shared by monitorconfig.test.js (modules/MonitorConfig.js) and configure.test.py (configure.py): both parsers must give these answers. text null = no file. overrides = what a monitor's settings resolve to before the global-folder fallback.",
+  "cases": [
+    {
+      "name": "missing file",
+      "text": null,
+      "config": {
+        "monitors": {}
+      },
+      "overrides": {
+        "DP-1": {
+          "enabled": true,
+          "scaling": "zoom",
+          "folder": ""
+        }
+      }
+    },
+    {
+      "name": "empty file",
+      "text": "",
+      "config": {
+        "monitors": {}
+      },
+      "overrides": {
+        "DP-1": {
+          "enabled": true,
+          "scaling": "zoom",
+          "folder": ""
+        }
+      }
+    },
+    {
+      "name": "corrupt JSON",
+      "text": "{{{ corrupt",
+      "config": {
+        "monitors": {}
+      },
+      "overrides": {
+        "DP-1": {
+          "enabled": true,
+          "scaling": "zoom",
+          "folder": ""
+        }
+      }
+    },
+    {
+      "name": "a list",
+      "text": "[1, 2]",
+      "config": {
+        "monitors": {}
+      },
+      "overrides": {
+        "DP-1": {
+          "enabled": true,
+          "scaling": "zoom",
+          "folder": ""
+        }
+      }
+    },
+    {
+      "name": "null",
+      "text": "null",
+      "config": {
+        "monitors": {}
+      },
+      "overrides": {
+        "DP-1": {
+          "enabled": true,
+          "scaling": "zoom",
+          "folder": ""
+        }
+      }
+    },
+    {
+      "name": "monitors is a list",
+      "text": "{\"monitors\": []}",
+      "config": {
+        "monitors": {}
+      },
+      "overrides": {
+        "DP-1": {
+          "enabled": true,
+          "scaling": "zoom",
+          "folder": ""
+        }
+      }
+    },
+    {
+      "name": "no monitors key",
+      "text": "{\"refreshToken\": 5}",
+      "config": {
+        "monitors": {}
+      },
+      "overrides": {
+        "DP-1": {
+          "enabled": true,
+          "scaling": "zoom",
+          "folder": ""
+        }
+      }
+    },
+    {
+      "name": "valid, with odd entries",
+      "text": "{\"monitors\": {\"DP-1\": {\"enabled\": false, \"scaling\": \"fit\", \"folder\": \"/w/one\"}, \"HDMI-1\": {\"folder\": \"file:///w/Wall%20Two\"}, \"DP-2\": 5, \"DP-3\": {\"scaling\": \"fill\", \"enabled\": \"no\", \"folder\": 7}, \"DP-4\": {\"folder\": \"  /w/padded  \", \"scaling\": \"tile\"}}, \"refreshToken\": 42}",
+      "config": {
+        "monitors": {
+          "DP-1": {
+            "enabled": false,
+            "scaling": "fit",
+            "folder": "/w/one"
+          },
+          "HDMI-1": {
+            "folder": "file:///w/Wall%20Two"
+          },
+          "DP-2": 5,
+          "DP-3": {
+            "scaling": "fill",
+            "enabled": "no",
+            "folder": 7
+          },
+          "DP-4": {
+            "folder": "  /w/padded  ",
+            "scaling": "tile"
+          }
+        },
+        "refreshToken": 42
+      },
+      "overrides": {
+        "DP-1": {
+          "enabled": false,
+          "scaling": "fit",
+          "folder": "/w/one"
+        },
+        "HDMI-1": {
+          "enabled": true,
+          "scaling": "zoom",
+          "folder": "/w/Wall Two"
+        },
+        "DP-2": {
+          "enabled": true,
+          "scaling": "zoom",
+          "folder": ""
+        },
+        "DP-3": {
+          "enabled": true,
+          "scaling": "zoom",
+          "folder": ""
+        },
+        "DP-4": {
+          "enabled": true,
+          "scaling": "tile",
+          "folder": "/w/padded"
+        },
+        "eDP-1": {
+          "enabled": true,
+          "scaling": "zoom",
+          "folder": ""
+        }
+      }
+    }
+  ]
+}

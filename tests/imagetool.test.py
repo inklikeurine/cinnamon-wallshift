@@ -157,6 +157,22 @@ check(parts() == [] and not os.path.exists(os.path.join(tmp, 'gone')), 'no .part
 check(tool('compose', '{bad json').returncode == 1, 'malformed job: exit 1')
 check(tool().returncode == 2 and tool('thumb', wide).returncode == 2, 'wrong arguments: usage, exit 2')
 
+print('batch thumbnails (0.2.3)')
+jobs = [[wide, 250, 140, os.path.join(tmp, 'b1.jpg')],
+        [junk, 250, 140, os.path.join(tmp, 'b2.jpg')],
+        [wide, 140, 250, os.path.join(tmp, 'b3.jpg')]]
+r = tool('thumbs', json.dumps(jobs))
+lines = [json.loads(l) for l in r.stdout.splitlines() if l.strip()]
+check(r.returncode == 0, 'exit 0 even with a bad image in the batch')
+check([l['output'] for l in lines] == [j[3] for j in jobs], 'one result line per job, in order')
+check([l['ok'] for l in lines] == [True, False, True], 'the bad image fails alone')
+check('not a readable image' in lines[1].get('error', ''), 'failure line carries the reason')
+sizes = [(GdkPixbuf.Pixbuf.new_from_file(j[3]).get_width(), GdkPixbuf.Pixbuf.new_from_file(j[3]).get_height())
+         for j, l in zip(jobs, lines) if l['ok']]
+check(sizes == [(250, 140), (140, 250)], 'batch thumbnails have the requested sizes')
+check(not os.path.exists(jobs[1][3]) and parts() == [], 'nothing written for the bad one, no .part left')
+check(tool('thumbs', '{bad json').returncode == 1, 'malformed batch: exit 1')
+
 print('file')
 check(os.access(TOOL, os.X_OK), 'imagetool.py is executable')
 check(open(TOOL).readline().strip() == '#!/usr/bin/python3', 'shebang is /usr/bin/python3')

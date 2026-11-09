@@ -23,8 +23,22 @@ T.run('modules export their classes through Cinnamon-style require()', () => {
     T.eq(typeof require('./modules/ThumbnailCache').ThumbnailCache, 'function', 'ThumbnailCache');
     T.eq(typeof require('./modules/CarouselLayout').layout, 'function', 'CarouselLayout.layout');
     T.eq(typeof require('./modules/ThemeColors').paletteFrom, 'function', 'ThemeColors.paletteFrom');
+    T.eq(typeof require('./modules/Actions').run, 'function', 'Actions.run');
+    T.eq(typeof require('./modules/Actions').ACTIONS, 'object', 'Actions.ACTIONS');
     T.eq(typeof Utils._, 'function', 'Utils._ (applet gettext domain)');
     T.ok(require('./modules/Utils') === Utils, 'require() returns one instance per path');
+});
+
+T.run('no module declares a top-level name Cinnamon\'s loader refuses to export (0.2.3)', () => {
+    // fileUtils.js skips names matching a core import (lowercased); a module
+    // exporting `overrides` would silently export nothing under that name.
+    const core = ['mainloop', 'jsunit', 'format', 'signals', 'lang', 'tweener', 'overrides',
+                  'gettext', 'coverage', 'package', 'cairo', 'bytearray', 'caironative'];
+    for (const n of T.listDir(appletDir + '/modules').filter(f => f.endsWith('.js'))) {
+        const src = T.readFile(appletDir + '/modules/' + n);
+        for (const m of src.matchAll(/^(?:var|function|class)\s+([A-Za-z0-9_$]+)/gm))
+            T.ok(!core.includes(m[1].toLowerCase()), n + ': exports ' + m[1]);
+    }
 });
 
 T.run('no shipped file uses the GJS importer for local modules', () => {
@@ -53,18 +67,25 @@ T.runAsync('ThumbnailCache.destroy() drops queued jobs and ignores in-flight res
     const dir = T.tmpDir('thumbs');
     const tc  = new ThumbnailCache(dir, ARGV[0] + '/imagetool.py');
     let called = 0;
-    for (let i = 0; i < 6; i++) {          // MAX_CONCURRENT is 4: four run, two queue
+    const ask = i => {
         const p = dir + '/img' + i + '.jpg';
         T.writeFile(p, 'not an image');    // imagetool.py will fail — asynchronously
         tc.ensureThumbnail(p, 250, 140, () => called++);
-    }
-    T.eq(tc._activeJobs, 4, 'four jobs in flight');
-    T.eq(tc._queue.length, 2, 'two jobs queued');
-    tc.destroy();
-    T.eq(tc._queue.length, 0, 'queue dropped');
-    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => {
-        T.eq(called, 0, 'no callback fired after destroy()');
-        done();
+    };
+    for (let i = 0; i < 6; i++) ask(i);
+    T.eq([tc._queue.length, tc._workers], [6, 0], 'requests gather until the next idle (0.2.3)');
+    GLib.idle_add(GLib.PRIORITY_LOW, () => {   // after the cache's own idle drain
+        T.eq(tc._workers, 2, 'two workers started');
+        T.eq(tc._inFlight.size, 6, 'all six handed out');
+        ask(6);                                // queued behind the busy workers
+        T.ok(tc._drainId > 0, 'a drain is pending for the new request');
+        tc.destroy();
+        T.eq([tc._queue.length, tc._inFlight.size, tc._drainId], [0, 0, 0], 'queue, in-flight list and idle source dropped');
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => {
+            T.eq(called, 0, 'no callback fired after destroy()');
+            done();
+            return GLib.SOURCE_REMOVE;
+        });
         return GLib.SOURCE_REMOVE;
     });
 }, 10);

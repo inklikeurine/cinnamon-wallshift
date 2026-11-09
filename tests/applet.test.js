@@ -2,80 +2,17 @@
 //   0.0.4 — B1 pause icon, B2 interval, B3 Sync-mode carousel click, B4 GI imports
 //   0.1.0 — menu layouts (one monitor, Sync, per monitor, icons on every row),
 //           tooltip, middle-click pause, scroll guard, favorites, notifications
-// The real applet.js source is evaluated the way Cinnamon's loader would, with
-// small stand-ins for imports.ui.*, for St / Clutter / Pango (Cinnamon-only
-// typelibs) and for the two modules that need a running shell (CarouselManager,
-// MonitorManager). Methods are called on a bare prototype instance, so nothing
-// touches ~/.local/share/wallshift.
+// The real applet.js source is evaluated by support/appletLoader.js the way
+// Cinnamon's loader would, with stand-ins for the shell. Methods are called on a
+// bare prototype instance, so nothing touches ~/.local/share/wallshift.
 imports.searchPath.unshift(ARGV[1]);
 const T = imports.lib;
 const GLib = imports.gi.GLib;
 const appletDir = ARGV[0];
-const realRequire = T.makeRequire(appletDir);
-
-// ── Stand-ins ──────────────────────────────────────────────────────────────────
-
-const notified = [];
-class FakeIconApplet {
-    set_applet_icon_symbolic_name(name) { this.iconName = name; }
-    set_applet_tooltip(text) { this.tooltip = text; }
-}
-class FakeLabel {
-    constructor(text) { this.text = text; this.clutter_text = {}; this.classes = []; }
-    set_style(s) { this.style = s; }
-    add_style_class_name(c) { this.classes.push(c); }
-}
-class FakeItem {
-    constructor(kind, text, extra) {
-        Object.assign(this, { kind, text, label: new FakeLabel(text), actor: { visible: true },
-                              sensitive: true, handlers: {} }, extra || {});
-    }
-    connect(sig, cb) { this.handlers[sig] = cb; }
-    setSensitive(v) { this.sensitive = v; }
-    setToggleState(v) { this.state = v; }
-}
-class FakeSection {
-    constructor() { this.items = []; }
-    addMenuItem(i) { this.items.push(i); }
-    removeAll() { this.items = []; }
-}
-const FakePopupMenu = {
-    PopupMenuItem:  class extends FakeItem { constructor(t, p) { super('plain', t, { reactive: !(p && p.reactive === false) }); } },
-    PopupIconMenuItem: class extends FakeItem {
-        constructor(t, icon, _type, p) { super('icon', t, { icon, reactive: !(p && p.reactive === false) }); } },
-    PopupSwitchIconMenuItem: class extends FakeItem {
-        constructor(t, active, icon) { super('switch', t, { icon, state: active, reactive: true }); } },
-    PopupSubMenuMenuItem: class extends FakeItem {
-        constructor(t) { super('sub', t, { menu: new FakeSection(), icons: [], reactive: true }); }
-        addActor(a) { this.icons.push(a.icon_name); } },
-    PopupSeparatorMenuItem: class extends FakeItem { constructor() { super('sep', ''); } },
-    PopupMenuSection: FakeSection,
-};
-const FakeSt = {
-    Icon: class { constructor(o) { Object.assign(this, o); } },
-    IconType: { SYMBOLIC: 1, FULLCOLOR: 0 },
-};
-const FakeClutter = { EVENT_STOP: true, EVENT_PROPAGATE: false, ScrollDirection: { UP: 0, DOWN: 1, LEFT: 2, RIGHT: 3 } };
-const FakePango = { EllipsizeMode: { END: 3 } };
-const FakeMessageTray = {
-    SystemNotificationSource: class { notify(n) { notified.push([n.title, n.body]); } },
-    Notification: class { constructor(_s, title, body) { this.title = title; this.body = body; } setTransient() {} },
-};
-const fakeImports = {
-    gi: new Proxy({}, { get: (_t, k) => ({ St: FakeSt, Clutter: FakeClutter, Pango: FakePango })[k] || imports.gi[k] }),
-    gettext: imports.gettext,
-    ui: { applet: { IconApplet: FakeIconApplet }, popupMenu: FakePopupMenu, settings: {},
-          main: { notify(t, b) { notified.push([t, b]); }, messageTray: { add() {} } },
-          messageTray: FakeMessageTray },
-};
-function fakeRequire(path) {
-    if (path === './modules/CarouselManager') return { CarouselManager: class {} };
-    if (path === './modules/MonitorManager')  return { MonitorManager: class {} };
-    return realRequire(path);
-}
-const src = T.readFile(appletDir + '/applet.js');
-const WallshiftApplet = new Function('require', 'imports',
-    "'use strict';" + src + '\n;return WallshiftApplet;')(fakeRequire, fakeImports);
+imports.searchPath.unshift(ARGV[2] + '/support');
+const L = imports.appletLoader;
+const { notified, FakeItem, FakeSection, FakePango, FakeClutter } = L;
+const { WallshiftApplet, src, require } = L.load(T, appletDir);
 
 // ── Fixture applet ─────────────────────────────────────────────────────────────
 
@@ -319,5 +256,170 @@ T.run('carousel options are sanitised before they reach the carousel', () => {
     a._carouselThumbSize = 'huge';
     T.eq(a._carouselOptions().thumbSize, 'medium');
 });
+
+// ── 0.2.3: programs are started from an argument list, never a shell string ────
+
+T.run('viewer, folder and settings window get the path as one argument (0.2.3)', () => {
+    const Utils = require('./modules/Utils');
+    const real = Utils.launch;
+    const calls = [];
+    Utils.launch = argv => { calls.push(argv); return true; };
+    try {
+        const odd = '/w/it\'s "quoted" $HOME & co.jpg';
+        const a = fakeApplet({});
+        a._openImageInViewer(odd);
+        T.eq(calls[0], ['xdg-open', odd], 'viewer gets the path untouched');
+        a._stateManager.getMonitorRecord = () => ({ currentImage: odd });
+        a._openCurrentFolder();
+        T.eq(calls[1], ['xdg-open', '/w'], 'folder of the current image');
+        a._metadata = { path: '/apps/my applets/wallshift@inklikeurine', uuid: 'wallshift@inklikeurine' };
+        a._instanceId = 42;
+        a.configureApplet();
+        T.eq(calls[2], ['/usr/bin/python3', '/apps/my applets/wallshift@inklikeurine/configure.py',
+                        'wallshift@inklikeurine', '42'], 'settings window: path with a space stays one argument');
+    } finally {
+        Utils.launch = real;
+    }
+    T.ok(!/spawn_command_line/.test(src), 'applet.js builds no shell command lines');
+});
+
+// ── 0.2.3: named actions (modules/Actions.js) ─────────────────────────────────
+
+const Actions = require('./modules/Actions');
+
+// The whole menu, static rows included, for one layout.
+function builtMenu(opts) {
+    const a = fakeApplet(opts);
+    a.menu = new FakeSection();
+    a.menu.connect = () => {};
+    a.menu.close = () => { a.closed = (a.closed || 0) + 1; };
+    a._buildMenu();
+    a._updateMenuState();
+    const rows = [];
+    const walk = list => { for (const i of list) { if (i.menu) walk(i.menu.items); else if (i.items) walk(i.items); else rows.push(i); } };
+    walk(a.menu.items);
+    return { a, rows: rows.filter(i => i.kind !== 'sep' && i.reactive !== false) };
+}
+
+T.run('every clickable menu row runs a named action; every action is in the menu (0.2.3)', () => {
+    const seen = new Set();
+    for (const opts of [{}, { sync: true }, { monitors: [MONS[0]] }]) {
+        const { rows } = builtMenu(opts);
+        for (const r of rows) {
+            T.ok(r.actionId in Actions.ACTIONS, '"' + r.text + '" → ' + r.actionId);
+            seen.add(r.actionId);
+        }
+    }
+    T.eq([...seen].sort(), Object.keys(Actions.ACTIONS).sort(), 'no action without a menu row');
+    for (const [id, def] of Object.entries(Actions.ACTIONS))
+        T.ok(def.label().length > 0 && /-symbolic$/.test(def.icon) && typeof def.run === 'function', id + ': label, icon, run');
+});
+
+T.run('menu rows call the same applet methods as before, for their own monitor (0.2.3)', () => {
+    const { a, rows } = builtMenu({});
+    const calls = [];
+    for (const m of ['_navigateNext', '_navigatePrevious', '_swapImages', '_refreshMonitors', '_openCurrentFolder',
+                     '_changeMonitorWallpaper', '_navigateMonitorPrevious', '_toggleFavorite', '_trashMonitorImage',
+                     '_openImageInViewer', '_onPauseToggled'])
+        a[m] = (...args) => calls.push([m].concat(args));
+    a._carouselManager = { isOpen: () => false, openCarousel: m => calls.push(['open', m.name]),
+                           closeCarousel: n => calls.push(['close', n]) };
+    const pick = (id, i) => rows.filter(r => r.actionId === id)[i || 0];
+    const fire = (row, state) => { if (row.kind === 'switch') { row.state = state; row.handlers.toggled(); } else row.handlers.activate(); };
+    a.closed = 0;
+    fire(pick('next'));                    T.eq(calls.pop(), ['_navigateNext']);
+    fire(pick('previous'));                T.eq(calls.pop(), ['_navigatePrevious']);
+    fire(pick('pause'), true);             T.eq(calls.pop(), ['_onPauseToggled', true]);
+    T.eq(a.closed, 0, 'Next / Previous / Pause leave the menu open, as before');
+    fire(pick('swap'));                    T.eq(calls.pop(), ['_swapImages']);
+    fire(pick('refresh-monitors'));        T.eq(calls.pop(), ['_refreshMonitors']);
+    fire(pick('open-folder'));             T.eq(calls.pop(), ['_openCurrentFolder']);
+    fire(pick('monitor-next', 1));         T.eq(calls.pop(), ['_changeMonitorWallpaper', 'HDMI-1']);
+    fire(pick('monitor-previous', 1));     T.eq(calls.pop(), ['_navigateMonitorPrevious', 'HDMI-1']);
+    fire(pick('favorite', 0));             T.eq(calls.pop(), ['_toggleFavorite', 'DP-1']);
+    fire(pick('trash', 2));                T.eq(calls.pop(), ['_trashMonitorImage', 'DP-2']);
+    fire(pick('open-viewer', 1));          T.eq(calls.pop(), ['_openImageInViewer', '/w/two.jpg']);
+    fire(pick('carousel', 1), true);       T.eq(calls.pop(), ['open', 'HDMI-1']);
+    fire(pick('carousel', 1), false);      T.eq(calls.pop(), ['close', 'HDMI-1']);
+    T.eq(a.closed, 9, 'the other rows close the menu first, as before');
+    const paused = [];
+    a._stateManager.setMonitorPaused = (n, v) => paused.push([n, v]);
+    fire(pick('monitor-pause', 0), true);
+    T.eq(paused, [['DP-1', true]], 'per-monitor pause');
+});
+
+T.run('Actions.run: unknown ids, missing monitors and a removed applet are ignored (0.2.3)', () => {
+    const a = fakeApplet({});
+    T.eq(Actions.run(a, 'no-such-action'), false, 'unknown id → false, no throw');
+    T.eq(Actions.run(a, 'trash'), false, 'per-monitor action without a monitor → false');
+    let ran = false;
+    a._navigateNext = () => { ran = true; };
+    a._destroyed = true;
+    T.eq(a._runAction('next'), false, 'removed applet: nothing runs');
+    T.eq(ran, false);
+    a._destroyed = false;
+    T.eq(a._runAction('next'), true);
+    T.eq(ran, true);
+});
+
+// ── 0.2.3: rotation decisions come from modules/Rotation.js ────────────────────
+
+T.run('timer tick, swap and history steps still reach the compositor (0.2.3)', () => {
+    const a = fakeApplet({});
+    const next = { 'DP-1': ['/w/p1.jpg'], 'HDMI-1': ['/w/p2.jpg'] };
+    a._imagePools = new Map(Object.keys(next).map(k => [k, { next: () => next[k].shift() || null, getCount: () => 1 }]));
+    a._changeWallpaper();
+    T.eq(a.composed.images, { 'DP-1': '/w/p1.jpg', 'HDMI-1': '/w/p2.jpg' }, 'enabled monitors advance');
+    T.eq(a.composed.assignments['DP-2'].path, '/w/three.jpg', 'disabled DP-2 keeps its image in the composite');
+    a.composed = null;
+    a._compositeInProgress = true;
+    a._changeWallpaper();
+    T.eq([a.composed, a._pendingChange], [null, true], 'mid-composite: queued, not composed');
+    a._compositeInProgress = false;
+
+    a._swapImages();
+    T.eq(a.composed.images, { 'DP-1': '/w/two.jpg', 'HDMI-1': '/w/three.jpg', 'DP-2': '/w/one.jpg' }, 'swap rotates left');
+
+    const view = a._rotationView.bind(a);
+    a._rotationView = () => Object.assign(view(), { exists: () => true });   // the /w/ paths are not real files
+    const hist = [{ monitors: { 'DP-1': '/w/h1.jpg' } }];
+    a._stateManager.getHistoryAt = i => hist[i - 1] || null;
+    a._historyPosition = 0;
+    a._navigatePrevious();
+    T.eq([a._historyPosition, a.composed.isNew, a.composed.assignments['DP-1'].path], [1, false, '/w/h1.jpg'], 'back one step');
+    a._navigatePrevious();
+    T.eq(a._historyPosition, 1, 'nothing older: position unchanged');
+    let advanced = false;
+    a._navigateNext();
+    T.eq(a._historyPosition, 0, 'forward to the tip');
+    a._changeWallpaper = () => { advanced = true; };
+    a._navigateNext();
+    T.eq(advanced, true, 'at the tip, Next changes the wallpaper');
+});
+
+T.runAsync('Favorite copies in the background, then says so (0.2.3)', done => {
+    const srcDir = T.tmpDir('fav-src'), favDir = T.tmpDir('fav-dst') + '/Wallpaper Favorites';
+    const img = srcDir + '/it\'s a "pic".jpg';
+    T.writeFile(img, 'image bytes');
+    const a = fakeApplet({ favDir });
+    a._destroyed = false;
+    a._stateManager.getMonitorRecord = () => ({ currentImage: img });
+    let refreshed = 0;
+    a._carouselManager.refreshFavorite = () => refreshed++;
+    notified.length = 0;
+    a._toggleFavorite('DP-1');
+    T.eq(notified.length, 0, 'nothing announced before the copy finished');
+    const t0 = GLib.get_monotonic_time();
+    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 20, () => {
+        if (!notified.length && GLib.get_monotonic_time() - t0 < 5e6) return GLib.SOURCE_CONTINUE;
+        T.eq(T.readFile(favDir + '/it\'s a "pic".jpg'), 'image bytes', 'copied, folder created, odd name intact');
+        T.eq(notified[0], ['Wallshift', 'Saved to Favorites: it\'s a "pic".jpg']);
+        T.eq(refreshed, 1, 'carousel star refreshed');
+        const copyFn = src.slice(src.indexOf('    _copyToFavorites('), src.indexOf('    _trashPath('));
+        T.ok(copyFn.length > 0 && !/file_get_contents|file_set_contents/.test(copyFn), 'no synchronous read or write of the image');
+        done();
+        return GLib.SOURCE_REMOVE;
+    });
+}, 10);
 
 imports.system.exit(T.summary());

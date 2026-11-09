@@ -54,6 +54,52 @@ var spawnAsync = function(argv, callback) {
     }
 };
 
+// Async subprocess read line by line: onLine(line) for each line of stdout (stderr
+// merged in) as soon as it arrives, then onExit(err, exitCode) once the process has
+// exited. argv is string[]. Never throws; a process that cannot start gives
+// onExit(err, -1) and no lines.
+var spawnLines = function(argv, onLine, onExit) {
+    let proc;
+    try {
+        proc = Gio.Subprocess.new(argv, Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_MERGE);
+    } catch(e) {
+        onExit(e, -1);
+        return;
+    }
+    let stream = new Gio.DataInputStream({ base_stream: proc.get_stdout_pipe(), close_base_stream: true });
+    let finish = () => {
+        proc.wait_async(null, (p, res) => {
+            try { p.wait_finish(res); } catch(e) { /* exit status below */ }
+            try { stream.close(null); } catch(e) { /* already closed */ }
+            onExit(null, p.get_if_exited() ? p.get_exit_status() : -1);
+        });
+    };
+    let read = () => {
+        stream.read_line_async(GLib.PRIORITY_DEFAULT, null, (s, res) => {
+            let line = null;
+            try { [line] = s.read_line_finish_utf8(res); } catch(e) { line = null; }
+            if (line === null) { finish(); return; }
+            try { onLine(line); } catch(e) { error('spawnLines: ' + e.message); }
+            read();
+        });
+    };
+    read();
+};
+
+// Fire-and-forget launch (viewer, file manager, settings window). argv is string[],
+// passed straight to the program — never through a shell — so a path containing
+// quotes, `$` or spaces reaches it intact. GLib reaps the child. Returns false (and
+// logs) when the program could not be started.
+var launch = function(argv) {
+    try {
+        GLib.spawn_async(null, argv, null, GLib.SpawnFlags.SEARCH_PATH, null);
+        return true;
+    } catch(e) {
+        warn('Could not start ' + argv[0] + ': ' + e.message);
+        return false;
+    }
+};
+
 // Check if a path is a regular file.
 var fileExists = function(path) {
     return GLib.file_test(path, GLib.FileTest.IS_REGULAR);

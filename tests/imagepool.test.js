@@ -93,4 +93,35 @@ T.runAsync('a scan superseded by a newer scan never fires its callback', done =>
     p.scan(() => { fired.push(2); T.eq(fired, [2]); done(); });
 });
 
+T.runAsync('sharedScanner: monitors on one folder share one find; queues stay their own (0.2.3)', done => {
+    const M = require('./modules/ImagePool');
+    const Utils = require('./modules/Utils');
+    const real = Utils.spawnAsync;
+    let finds = 0;
+    Utils.spawnAsync = (argv, cb) => { if (argv[0] === 'find') finds++; return real(argv, cb); };
+    const other = T.tmpDir('pool-other');
+    T.writeFile(other + '/solo.jpg', 'x');
+    const scan = M.sharedScanner();
+    const a = new ImagePool('A'), b = new ImagePool('B'), c = new ImagePool('C');
+    a.setFolders([dir]); b.setFolders([dir]); c.setFolders([other]);
+    b.setTrashedPaths([names[0]]);
+    let left = 3;
+    const fin = () => {
+        if (--left) return;
+        Utils.spawnAsync = real;
+        T.eq(finds, 2, 'two folders → two find runs for three pools');
+        T.eq(a.getCount(), N, 'A sees the whole folder');
+        T.eq(b.getCount(), N - 1, 'B applies its own trash list');
+        T.eq(c.getImages(), [other + '/solo.jpg'], 'C has its own folder');
+        const seenA = new Set(); for (let i = 0; i < N; i++) seenA.add(a.next());
+        T.eq(seenA.size, N, 'A still runs a full no-repeat cycle');
+        b.next(); b.next();
+        T.eq(a._queue.length, 0, 'drawing from B does not touch A\'s queue');
+        a.removePath(names[1]);
+        T.eq([a.getCount(), b.getCount()], [N - 1, N - 1], 'removing from A leaves B\'s list alone');
+        done();
+    };
+    a.scan(fin, scan); b.scan(fin, scan); c.scan(fin, scan);
+});
+
 imports.system.exit(T.summary());
